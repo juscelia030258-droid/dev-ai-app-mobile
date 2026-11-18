@@ -217,6 +217,18 @@ class LocalDevAiIntegrationTest {
                 ).execute().use { it.code }
                 assertEquals(404, unknownModelCode)
 
+                // Unknown chat model IDs must be rejected, never silently routed to Coding AI.
+                val unknownChatJson = """{"model":"model-that-does-not-exist","messages":[{"role":"user","content":"Hello"}],"stream":false}"""
+                val unknownChat = httpClient.newCall(
+                    Request.Builder()
+                        .url("http://127.0.0.1:$freePort/v1/chat/completions")
+                        .header("Authorization", "Bearer $primaryRaw")
+                        .post(unknownChatJson.toRequestBody("application/json".toMediaType()))
+                        .build()
+                ).execute().use { resp -> resp.code to resp.body?.string().orEmpty() }
+                assertEquals(404, unknownChat.first)
+                assertTrue(unknownChat.second.contains("model_not_found"))
+
                 // Streaming request when no local model is assigned should return HTTP 422 JSON error before committing SSE 200
                 val streamUnconfiguredJson = """{"model":"local-dev-coding","messages":[{"role":"user","content":"Hello"}],"stream":true}"""
                 val preStreamFail = httpClient.newCall(
@@ -263,6 +275,18 @@ class LocalDevAiIntegrationTest {
         )
         assertTrue(emptyVerdict.isSuccess)
         assertFalse(emptyVerdict.getOrThrow().approved)
+
+        val malformedVerdict = container.reasoningAgent.parseVerdictSafely(
+            rawText = "A resposta do avaliador veio em texto livre, sem JSON.",
+            specialistOutput = "Esta resposta parece completa, mas precisa de avaliação real."
+        )
+        assertFalse("Malformed evaluator output must fail closed", malformedVerdict.approved)
+
+        val explicitApproval = container.reasoningAgent.parseVerdictSafely(
+            rawText = """{"approved":true,"contradictionsOrGaps":"Nenhuma","revisionInstruction":""}""",
+            specialistOutput = "Implementação revisada."
+        )
+        assertTrue(explicitApproval.approved)
 
         val plan = container.reasoningAgent.parsePlanSafely(
             rawText = """```json {"goalSummary":"UI Login","useVision":true,"useCoding":true,"visionInstruction":"Ler layout","codingInstruction":"Gerar Compose"} ```""",
