@@ -220,7 +220,7 @@ class InferenceRuntimeManager(
             }
         }
 
-        val mmprojBytes = model.mmprojPath?.let { java.io.File(it).takeIf(File::exists)?.length() } ?: 0L
+        val mmprojBytes = model.mmprojPath?.let { java.io.File(it).takeIf { file -> file.exists() }?.length() } ?: 0L
         val footprintMb = memoryBudgetManager.estimateGgufFootprintMb(
             fileSizeBytes = model.sizeBytes,
             contextLength = targetCtx,
