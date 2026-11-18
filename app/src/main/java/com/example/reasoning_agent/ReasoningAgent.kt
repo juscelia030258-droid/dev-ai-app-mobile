@@ -301,20 +301,12 @@ class ReasoningAgent(
             val parsed = runCatching { json.decodeFromString<EvaluationVerdict>(jsonBlock) }.getOrNull()
             if (parsed != null) return parsed
         }
-        val trimmed = specialistOutput.trim()
-        val looksIncomplete = trimmed.length < 15 || trimmed.endsWith("```") && trimmed.split("```").size % 2 == 0
-        return if (looksIncomplete) {
-            EvaluationVerdict(
-                approved = false,
-                contradictionsOrGaps = "Saída muito curta ou bloco de código não fechado.",
-                revisionInstruction = "Complete a implementação integralmente sem truncar."
-            )
-        } else {
-            EvaluationVerdict(
-                approved = true,
-                contradictionsOrGaps = "Verificado por heurística estrutural após resposta textual do avaliador."
-            )
-        }
+        // Fail closed: malformed evaluator output must never be treated as approval.
+        return EvaluationVerdict(
+            approved = false,
+            contradictionsOrGaps = "A Reasoning AI não retornou um veredito JSON válido; a saída não foi aprovada.",
+            revisionInstruction = "Reavalie a saída e retorne um JSON válido com approved, contradictionsOrGaps e revisionInstruction."
+        )
     }
 
     private fun extractJsonObject(text: String): String? {
