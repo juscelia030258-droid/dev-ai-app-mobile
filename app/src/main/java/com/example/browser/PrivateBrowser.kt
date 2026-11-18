@@ -1,0 +1,187 @@
+package com.example.browser
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import java.io.File
+import java.io.FileOutputStream
+import java.net.InetAddress
+import java.net.URI
+import java.util.Locale
+
+data class BrowserPage(
+    val requestedUrl: String,
+    val finalUrl: String,
+    val title: String,
+    val text: String,
+    val capturedAt: Long = System.currentTimeMillis()
+)
+
+/**
+ * Private, app-owned browser. It uses an isolated WebView with cookies and file
+ * access disabled. This first version is intentionally read-only: it can open
+ * public pages and extract visible text, but cannot submit forms or sign in.
+ */
+class PrivateBrowser(context: Context) {
+    private val appContext = context.applicationContext
+    private val mutex = Mutex()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    suspend fun openAndRead(url: String, objective: String = ""): Result<BrowserPage> = mutex.withLock {
+        runCatching {
+            val safeUrl = validatePublicUrl(url)
+            withTimeout(30_000L) {
+                browseOnMain(safeUrl, objective)
+            }
+        }
+    }
+
+    private suspend fun validatePublicUrl(raw: String): String = withContext(Dispatchers.IO) {
+        val uri = runCatching { URI(raw.trim()) }.getOrElse {
+            throw IllegalArgumentException("URL inválida.")
+        }
+        val scheme = uri.scheme?.lowercase(Locale.ROOT)
+        require(scheme == "https" || scheme == "http") { "O navegador aceita somente URLs HTTP ou HTTPS." }
+        val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.')
+            ?: throw IllegalArgumentException("A URL não possui um host válido.")
+        require(host.isNotBlank() && host != "localhost" && !host.endsWith(".localhost")) {
+            "O navegador não acessa endereços locais."
+        }
+        require(!host.matches(Regex("\\d{1,3}(\\.\\d{1,3}){3}")) && !host.contains(":")) {
+            "Endereços IP diretos não são aceitos; use o domínio público do site."
+        }
+        val addresses = runCatching { InetAddress.getAllByName(host).toList() }.getOrElse {
+            throw IllegalArgumentException("Não foi possível resolver o domínio: $host")
+        }
+        require(addresses.isNotEmpty() && addresses.all { isPublicAddress(it) }) {
+            "O navegador bloqueou um domínio que resolve para uma rede privada ou reservada."
+        }
+        uri.toASCIIString()
+    }
+
+    private fun isPublicAddress(address: InetAddress): Boolean =
+        !address.isAnyLocalAddress &&
+        !address.isLoopbackAddress &&
+        !address.isLinkLocalAddress &&
+        !address.isSiteLocalAddress &&
+        !address.isMulticastAddress
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private suspend fun browseOnMain(url: String, objective: String): BrowserPage {
+        val result = CompletableDeferred<BrowserPage>()
+        val webView = withContext(Dispatchers.Main) {
+            WebView(appContext).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.javaScriptCanOpenWindowsAutomatically = false
+                settings.setSupportMultipleWindows(false)
+                settings.loadsImagesAutomatically = false
+                settings.blockNetworkImage = true
+                settings.setGeolocationEnabled(false)
+                settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
+                CookieManager.getInstance().setAcceptCookie(false)
+                webChromeClient = WebChromeClient()
+            }
+        }
+
+        try {
+            withContext(Dispatchers.Main) {
+                webView.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                        val target = request?.url?.toString() ?: return true
+                        val scheme = request.url.scheme?.lowercase(Locale.ROOT)
+                        // Prevent redirects and page links from escaping to app/file/custom schemes.
+                        return scheme != "https" && scheme != "http"
+                    }
+
+                    override fun onPageFinished(view: WebView?, finishedUrl: String?) {
+                        if (result.isCompleted) return
+                        val script = """
+                            (function() {
+                              const clean = document.cloneNode(true);
+                              clean.querySelectorAll('script,style,noscript,svg,canvas,nav,footer,header,form').forEach(e => e.remove());
+                              return JSON.stringify({
+                                title: document.title || '',
+                                url: location.href || '',
+                                text: (clean.body ? clean.body.innerText : '').slice(0, 18000)
+                              });
+                            })();
+                        """.trimIndent()
+                        view?.evaluateJavascript(script) { raw ->
+                            if (result.isCompleted) return@evaluateJavascript
+                            val decoded = decodeJsString(raw.orEmpty())
+                            val fields = Regex("\\{.*}", RegexOption.DOT_MATCHES_ALL).find(decoded)?.value
+                            val title = jsonField(fields, "title")
+                            val finalUrl = jsonField(fields, "url").ifBlank { finishedUrl.orEmpty() }
+                            val text = jsonField(fields, "text")
+                            if (text.isBlank() && title.isBlank()) {
+                                result.completeExceptionally(IllegalStateException("A página abriu, mas não foi possível extrair seu conteúdo."))
+                            } else {
+                                result.complete(BrowserPage(url, finalUrl, title, text))
+                            }
+                        } ?: result.completeExceptionally(IllegalStateException("WebView não conseguiu ler a página."))
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: android.webkit.WebResourceError?
+                    ) {
+                        if (request?.isForMainFrame == true && !result.isCompleted) {
+                            result.completeExceptionally(
+                                IllegalStateException("Falha ao abrir a página: ${error?.description ?: "erro de rede"}")
+                            )
+                        }
+                    }
+                }
+                webView.loadUrl(url)
+            }
+            result.await()
+        } finally {
+            withContext(Dispatchers.Main) {
+                webView.stopLoading()
+                webView.loadUrl("about:blank")
+                webView.removeAllViews()
+                webView.destroy()
+            }
+        }
+    }
+
+    private fun decodeJsString(raw: String): String {
+        if (raw == "null") return ""
+        return runCatching {
+            val trimmed = raw.removeSurrounding("\"")
+            trimmed.replace("\\\\n", "\n")
+                .replace("\\\\r", "\r")
+                .replace("\\\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\")
+        }.getOrDefault(raw)
+    }
+
+    private fun jsonField(json: String?, key: String): String {
+        if (json.isNullOrBlank()) return ""
+        val match = Regex("\"$key\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").find(json) ?: return ""
+        return match.groupValues[1]
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+    }
+}
