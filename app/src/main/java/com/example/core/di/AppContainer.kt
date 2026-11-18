@@ -3,6 +3,7 @@ package com.example.core.di
 import android.content.Context
 import androidx.room.Room
 import com.example.agent_engine.MultiAgentOrchestrator
+import com.example.browser.PrivateBrowser
 import com.example.api_server.LocalNetworkDiscovery
 import com.example.api_server.OpenAiApiServer
 import com.example.coding_agent.CodingAgent
@@ -38,6 +39,7 @@ class AppContainer(context: Context) {
     val settingsRepository = SettingsRepository(appContext)
     val memoryBudgetManager = MemoryBudgetManager(deviceProfiler)
     val networkDiscovery = LocalNetworkDiscovery(appContext)
+    val privateBrowser = PrivateBrowser(appContext)
 
     val apiKeyManager = ApiKeyManager(database.apiKeyDao())
     val deviceAccessRepository = DeviceAccessRepository(database.connectedDeviceDao())
@@ -85,7 +87,8 @@ class AppContainer(context: Context) {
         agentConfigDao = database.agentConfigDao(),
         localModelDao = database.localModelDao(),
         multiAgentRunDao = database.multiAgentRunDao(),
-        settingsRepository = settingsRepository
+        settingsRepository = settingsRepository,
+        privateBrowser = privateBrowser
     )
 
     val openAiApiServer = OpenAiApiServer(
