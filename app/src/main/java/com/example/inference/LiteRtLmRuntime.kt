@@ -132,8 +132,12 @@ class LiteRtLmRuntime(
         val job = scope.launch {
             val startedAt = System.currentTimeMillis()
             val accumulated = StringBuilder()
+            // LiteRT emits text chunks rather than a reliable token counter. Use a
+            // conservative character-based estimate (about 4 UTF-16 chars per token).
             val maxTokensLimit = params.maxTokens.coerceIn(64, 4096)
-            var chunks = 0
+            val maxChars = maxTokensLimit * 4
+            var outputChars = 0
+            var limitReached = false
 
             try {
                 val convConfig = ConversationConfig(
@@ -173,11 +177,24 @@ class LiteRtLmRuntime(
                 trySend(InferenceStreamEvent.Status("Inferência LiteRT-LM iniciada"))
                 conv.sendMessageAsync(Contents.of(contentsList)).collect { msg ->
                     val piece = extractMessageText(msg)
-                    if (piece.isNotEmpty()) {
-                        chunks += 1
-                        accumulated.append(piece)
-                        trySend(InferenceStreamEvent.Token(piece))
-                        if (chunks >= maxTokensLimit) {
+                    if (piece.isNotEmpty() && !limitReached) {
+                        val remainingChars = (maxChars - outputChars).coerceAtLeast(0)
+                        var acceptedPiece = if (piece.length <= remainingChars) {
+                            piece
+                        } else {
+                            piece.take(remainingChars)
+                        }
+                        // Do not leave an unmatched UTF-16 high surrogate at the end.
+                        if (acceptedPiece.isNotEmpty() && Character.isHighSurrogate(acceptedPiece.last())) {
+                            acceptedPiece = acceptedPiece.dropLast(1)
+                        }
+                        if (acceptedPiece.isNotEmpty()) {
+                            accumulated.append(acceptedPiece)
+                            outputChars += acceptedPiece.length
+                            trySend(InferenceStreamEvent.Token(acceptedPiece))
+                        }
+                        if (outputChars >= maxChars && !limitReached) {
+                            limitReached = true
                             runCatching { conv.cancelProcess() }
                         }
                     }
@@ -187,7 +204,7 @@ class LiteRtLmRuntime(
                     InferenceStreamEvent.Completed(
                         fullText = accumulated.toString().trim(),
                         durationMs = dur,
-                        approxTokens = chunks.coerceAtLeast(1)
+                        approxTokens = ((outputChars + 3) / 4).coerceAtLeast(1)
                     )
                 )
                 close()
