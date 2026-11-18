@@ -1,6 +1,7 @@
 package com.example.inference
 
 import android.content.Context
+import android.net.Uri
 import com.example.core.model.InferenceParameters
 import com.example.core.model.RuntimeBackend
 import com.example.monitoring.data.LocalModelEntity
@@ -91,11 +92,13 @@ class LlamaCppRuntime(
 
         try {
             helper.load(
-                path = modelFile.absolutePath,
+                // The library expects a URI, including for files in app-private storage.
+                path = Uri.fromFile(modelFile).toString(),
                 contextLength = targetCtx,
-                mmprojPath = mmprojFile?.absolutePath
+                mmprojPath = mmprojFile?.let { Uri.fromFile(it).toString() }
             ) { _ ->
-                // The library callback is progress-only; wait for LLMEvent.Loaded.
+                // In llamacpp-kotlin 0.4.0 this callback signals that the model is loaded.
+                if (!loadedSignal.isCompleted) loadedSignal.complete(Unit)
             }
             withTimeout(90_000L) {
                 loadedSignal.await()
