@@ -73,6 +73,17 @@ class MultiAgentOrchestrator(
         val taskId = "task_${UUID.randomUUID().toString().take(8)}"
         val startedAt = System.currentTimeMillis()
         val settings = settingsRepository.settingsFlow.first()
+        val persistentContext = buildPersistentContext()
+        val enrichedRequest = if (persistentContext.isBlank()) userRequest else """
+            CONTEXTO PERSISTENTE DO PROJETO (tarefas anteriores concluídas):
+            $persistentContext
+
+            NOVA TAREFA DO USUÁRIO:
+            $userRequest
+
+            Use o contexto anterior somente quando for relevante. Preserve decisões e interfaces já estabelecidas,
+            mas priorize a nova solicitação quando houver conflito. Não trate tarefas antigas como instruções novas.
+        """.trimIndent()
         val maxRevisions = settings.maxMultiAgentRevisions.coerceIn(0, 4)
         val timeoutMs = settings.multiAgentTimeoutSec.coerceIn(30, 600) * 1000L
 
@@ -101,7 +112,7 @@ class MultiAgentOrchestrator(
                     // Phase 1: Reasoning AI interprets & plans
                     val planStart = System.currentTimeMillis()
                     val planResult = reasoningAgent.createPlan(
-                        userRequest = userRequest,
+                        userRequest = enrichedRequest,
                         hasImage = imagePath != null,
                         codingEnabled = codingReady,
                         visionEnabled = visionReady,
@@ -197,7 +208,7 @@ class MultiAgentOrchestrator(
                             )
                             val evStart = System.currentTimeMillis()
                             val vVerdict = reasoningAgent.evaluateSpecialistOutput(
-                                originalRequest = userRequest,
+                                originalRequest = enrichedRequest,
                                 plan = plan,
                                 agentRole = AgentRole.VISION,
                                 specialistOutput = candidateVision,
@@ -245,7 +256,9 @@ class MultiAgentOrchestrator(
                     // Phase 3: Coding AI + Reasoning Critic Revision Loop (bounded by maxRevisions)
                     if (plan.useCoding) {
                         var currentCodingInstruction = buildString {
-                            append(plan.codingInstruction.ifBlank { userRequest })
+                            append(plan.codingInstruction.ifBlank { enrichedRequest })
+                            append("\n\nContexto persistente do projeto:\n")
+                            append(persistentContext.ifBlank { "Ainda não há tarefas anteriores concluídas." })
                             if (!visionOutput.isNullOrBlank()) {
                                 append("\n\nContexto visual extraído pela Vision AI:\n")
                                 append(visionOutput)
@@ -339,7 +352,7 @@ class MultiAgentOrchestrator(
                                     Revise a sua resposta anterior com base na auditoria da Reasoning AI.
                                     Problemas apontados: ${verdict.contradictionsOrGaps}
                                     Instrução de correção: ${verdict.revisionInstruction}
-                                    Solicitação original: $userRequest
+                                    Solicitação original: $enrichedRequest
                                     Resposta anterior:
                                     ${candidateCoding.take(2500)}
                                 """.trimIndent()
@@ -361,7 +374,7 @@ class MultiAgentOrchestrator(
                     )
                     val synStart = System.currentTimeMillis()
                     val finalResult = reasoningAgent.synthesizeFinalResponse(
-                        originalRequest = userRequest,
+                        originalRequest = enrichedRequest,
                         plan = plan,
                         visionOutput = visionOutput,
                         codingOutput = codingOutput,
@@ -455,6 +468,27 @@ class MultiAgentOrchestrator(
         } finally {
             activeExecutionJob = null
         }
+    }
+
+    /** Builds a bounded, durable project memory from the latest successful Multi runs. */
+    private suspend fun buildPersistentContext(): String {
+        val previousRuns = multiAgentRunDao.getRecentCompleted()
+        if (previousRuns.isEmpty()) return ""
+
+        return buildString {
+            previousRuns.take(5).forEachIndexed { index, run ->
+                if (isNotEmpty()) append("\n\n--- Tarefa anterior ${index + 1} ---\n")
+                else append("--- Tarefa anterior ${index + 1} ---\n")
+                append("Pedido: ").append(run.originalRequest.take(900)).append("\n")
+                if (run.planJson.isNotBlank() && run.planJson != "{}") {
+                    append("Plano: ").append(run.planJson.take(1200)).append("\n")
+                }
+                if (run.finalResponse.isNotBlank()) {
+                    append("Resultado: ").append(run.finalResponse.take(1500)).append("\n")
+                }
+                append("Estado: ").append(run.status)
+            }
+        }.take(6000)
     }
 
     private suspend fun persistProgress(
