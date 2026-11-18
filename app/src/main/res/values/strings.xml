@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">LOCAL DEV AI</string>
+    <string name="fgs_channel_name">Servidor API Local</string>
+    <string name="fgs_channel_desc">Mantém o servidor API OpenAI-compatível e a fila de inferência ativos em segundo plano na rede Wi-Fi local.</string>
+</resources>

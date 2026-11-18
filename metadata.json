@@ -1,0 +1,6 @@
+{
+  "name": "LOCAL DEV AI",
+  "description": "Plataforma Android ARM64 de IA local com agentes de Coding, Vision e Reasoning, orquestração multiagente e servidor API compatível com OpenAI na rede local.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
