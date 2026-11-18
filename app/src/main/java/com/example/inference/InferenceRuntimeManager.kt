@@ -244,8 +244,15 @@ class InferenceRuntimeManager(
         val loadResult = try {
             targetRuntime.loadModel(model, params)
         } catch (oom: OutOfMemoryError) {
+            runCatching { targetRuntime.unloadModel() }
             unloadCurrentLocked("Recuperação de falta de memória (OOM)")
             Result.failure(IllegalStateException("Falta de memória (OOM) ao carregar ${model.name}. Reduza o contexto ou use quantização menor."))
+        }
+
+        // A failed native initialization may still hold partial resources. Release
+        // them before attempting another backend or returning an error.
+        if (loadResult.isFailure) {
+            runCatching { targetRuntime.unloadModel() }
         }
 
         // Automatic fallback from LiteRT-LM GPU to CPU if OpenCL fails on device
@@ -267,6 +274,7 @@ class InferenceRuntimeManager(
                 updateAgentState(role, AgentRuntimeState.IDLE)
                 return Result.success(snap)
             }
+            runCatching { liteRtCpuRuntime.unloadModel() }
         }
 
         if (loadResult.isFailure) {
