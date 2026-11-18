@@ -2,9 +2,6 @@ package com.example.browser
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Bitmap
-import android.os.Handler
-import android.os.Looper
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -16,11 +13,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.io.File
-import java.io.FileOutputStream
 import java.net.InetAddress
 import java.net.URI
 import java.util.Locale
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 data class BrowserPage(
     val requestedUrl: String,
@@ -38,13 +36,15 @@ data class BrowserPage(
 class PrivateBrowser(context: Context) {
     private val appContext = context.applicationContext
     private val mutex = Mutex()
-    private val mainHandler = Handler(Looper.getMainLooper())
 
-    suspend fun openAndRead(url: String, objective: String = ""): Result<BrowserPage> = mutex.withLock {
+    suspend fun searchAndRead(query: String): Result<BrowserPage> =
+        openAndRead("https://html.duckduckgo.com/html/?q=" + java.net.URLEncoder.encode(query.take(200), "UTF-8"))
+
+    suspend fun openAndRead(url: String): Result<BrowserPage> = mutex.withLock {
         runCatching {
             val safeUrl = validatePublicUrl(url)
             withTimeout(30_000L) {
-                browseOnMain(safeUrl, objective)
+                browseOnMain(safeUrl)
             }
         }
     }
@@ -80,7 +80,7 @@ class PrivateBrowser(context: Context) {
         !address.isMulticastAddress
 
     @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun browseOnMain(url: String, objective: String): BrowserPage {
+    private suspend fun browseOnMain(url: String): BrowserPage {
         val result = CompletableDeferred<BrowserPage>()
         val webView = withContext(Dispatchers.Main) {
             WebView(appContext).apply {
@@ -162,26 +162,10 @@ class PrivateBrowser(context: Context) {
         }
     }
 
-    private fun decodeJsString(raw: String): String {
-        if (raw == "null") return ""
-        return runCatching {
-            val trimmed = raw.removeSurrounding("\"")
-            trimmed.replace("\\\\n", "\n")
-                .replace("\\\\r", "\r")
-                .replace("\\\\t", "\t")
-                .replace("\\\"", "\"")
-                .replace("\\\\", "\\")
-        }.getOrDefault(raw)
-    }
-
     private fun jsonField(json: String?, key: String): String {
         if (json.isNullOrBlank()) return ""
-        val match = Regex("\"$key\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").find(json) ?: return ""
-        return match.groupValues[1]
-            .replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\t", "\t")
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
+        return runCatching {
+            Json.parseToJsonElement(json).jsonObject[key]?.jsonPrimitive?.content.orEmpty()
+        }.getOrDefault("")
     }
 }
