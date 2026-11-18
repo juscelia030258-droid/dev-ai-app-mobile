@@ -174,6 +174,9 @@ interface MultiAgentRunDao {
     @Query("SELECT * FROM multi_agent_runs WHERE taskId = :taskId LIMIT 1")
     suspend fun getById(taskId: String): MultiAgentRunEntity?
 
+    @Query("SELECT * FROM multi_agent_runs WHERE status = 'COMPLETED' ORDER BY createdAt DESC LIMIT 5")
+    suspend fun getRecentCompleted(): List<MultiAgentRunEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(run: MultiAgentRunEntity)
 }
