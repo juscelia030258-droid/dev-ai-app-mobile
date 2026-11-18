@@ -84,10 +84,16 @@ class MemoryBudgetManager(
         )
     }
 
-    fun estimateGgufFootprintMb(fileSizeBytes: Long, contextLength: Int): Long {
+    fun estimateGgufFootprintMb(
+        fileSizeBytes: Long,
+        contextLength: Int,
+        mmprojSizeBytes: Long = 0L
+    ): Long {
         val weightsMb = (fileSizeBytes / (1024L * 1024L)).coerceAtLeast(64L)
-        // Conservative KV cache + scratch buffer + projector overhead estimate
+        val mmprojMb = (mmprojSizeBytes / (1024L * 1024L)).coerceAtLeast(0L)
+        // Keep runtime estimates aligned with the validator's base overhead,
+        // then add KV-cache growth and the actual multimodal projector size.
         val kvCacheMb = ((contextLength.toLong() / 1024L) * 48L).coerceAtLeast(128L)
-        return (weightsMb * 1.15).toLong() + kvCacheMb
+        return (weightsMb * 1.15).toLong() + kvCacheMb + 256L + mmprojMb
     }
 }
