@@ -338,6 +338,17 @@ class OpenAiApiServer(
         }
 
         val targetModelId = resolveTargetModelId(req.model, req.agent)
+        if (targetModelId == null) {
+            respondOpenAiError(
+                call,
+                HttpStatusCode.NotFound,
+                "Modelo '${req.agent?.takeIf { it.isNotBlank() } ?: req.model}' não encontrado. Consulte GET /v1/models.",
+                "invalid_request_error",
+                "model_not_found"
+            )
+            logRequest("POST", "/v1/chat/completions", req.model, remoteIp, auth.keyEntity.name, 404, System.currentTimeMillis() - startMs, req.stream, "Modelo não encontrado")
+            return
+        }
         if (!auth.permission.allows(targetModelId)) {
             respondOpenAiError(
                 call,
@@ -796,14 +807,14 @@ class OpenAiApiServer(
         )
     }
 
-    private fun resolveTargetModelId(requestedModel: String, agentParam: String?): String {
+    private fun resolveTargetModelId(requestedModel: String, agentParam: String?): String? {
         val candidate = (agentParam?.takeIf { it.isNotBlank() } ?: requestedModel).trim().lowercase()
         return when (candidate) {
             "local-dev-coding", "coding" -> AgentRole.CODING.apiModelId
             "local-dev-vision", "vision" -> AgentRole.VISION.apiModelId
             "local-dev-reasoning", "reasoning" -> AgentRole.REASONING.apiModelId
             "local-dev-multiagent", "multiagent" -> AgentRole.MULTIAGENT_MODEL_ID
-            else -> AgentRole.CODING.apiModelId
+            else -> null
         }
     }
 
