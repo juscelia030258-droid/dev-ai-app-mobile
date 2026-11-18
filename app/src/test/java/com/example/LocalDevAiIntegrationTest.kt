@@ -27,7 +27,7 @@ import java.net.ServerSocket
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [35])
 class LocalDevAiIntegrationTest {
 
     private val httpClient = OkHttpClient.Builder()
