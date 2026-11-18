@@ -74,6 +74,17 @@ class LocalDevAiIntegrationTest {
         assertFalse(fitsHuge)
         assertNotNull(reason)
 
+        val baseModelFootprint = container.memoryBudgetManager.estimateGgufFootprintMb(
+            fileSizeBytes = 2_000L * 1024L * 1024L,
+            contextLength = 2048
+        )
+        val visionModelFootprint = container.memoryBudgetManager.estimateGgufFootprintMb(
+            fileSizeBytes = 2_000L * 1024L * 1024L,
+            contextLength = 2048,
+            mmprojSizeBytes = 100L * 1024L * 1024L
+        )
+        assertTrue("Vision projector must be included in RAM estimate", visionModelFootprint >= baseModelFootprint + 100L)
+
         val validGguf = File(context.cacheDir, "unit_valid.gguf")
         val textOnlyGguf = File(context.cacheDir, "unit_text_vision.gguf")
         val corruptFile = File(context.cacheDir, "unit_corrupt.gguf")
