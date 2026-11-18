@@ -166,6 +166,26 @@ class LocalDevAiIntegrationTest {
                 ).execute().use { it.code }
                 assertEquals(403, forbiddenCode)
 
+                val scopedModelsBody = httpClient.newCall(
+                    Request.Builder()
+                        .url("http://127.0.0.1:$freePort/v1/models")
+                        .header("Authorization", "Bearer $codingSecret")
+                        .build()
+                ).execute().use { resp ->
+                    assertEquals(200, resp.code)
+                    resp.body?.string().orEmpty()
+                }
+                assertTrue(scopedModelsBody.contains("local-dev-coding"))
+                assertFalse(scopedModelsBody.contains("local-dev-vision"))
+
+                val scopedSingleModelCode = httpClient.newCall(
+                    Request.Builder()
+                        .url("http://127.0.0.1:$freePort/v1/models/local-dev-vision")
+                        .header("Authorization", "Bearer $codingSecret")
+                        .build()
+                ).execute().use { it.code }
+                assertEquals(403, scopedSingleModelCode)
+
                 container.apiKeyManager.revokeKey(codingKey.id)
                 val revokedCode = httpClient.newCall(
                     Request.Builder()
