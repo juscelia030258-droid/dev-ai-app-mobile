@@ -204,9 +204,12 @@ class MultiAgentOrchestrator(
                                 source = source
                             ).getOrNull()
 
-                            if (vVerdict == null || vVerdict.approved || visionAttempts > maxVisionRevisions) {
+                            if (vVerdict == null) {
+                                throw IllegalStateException("Reasoning AI não conseguiu avaliar a saída da Vision AI; a tarefa foi interrompida sem aprovação.")
+                            }
+                            if (vVerdict.approved) {
                                 visionApproved = true
-                                val note = vVerdict?.contradictionsOrGaps?.takeIf { it.isNotBlank() } ?: "Análise visual aprovada"
+                                val note = vVerdict.contradictionsOrGaps.takeIf { it.isNotBlank() } ?: "Análise visual aprovada"
                                 reviewNotes += "Vision AI avaliada: $note"
                                 steps += MultiAgentStep(
                                     stepIndex = steps.size + 1,
@@ -215,7 +218,7 @@ class MultiAgentOrchestrator(
                                     instruction = "Validar descrição visual extraída",
                                     outputSummary = note,
                                     durationMs = System.currentTimeMillis() - evStart,
-                                    passedReview = vVerdict?.approved ?: true
+                                    passedReview = true
                                 )
                             } else {
                                 revisionCount += 1
@@ -230,6 +233,9 @@ class MultiAgentOrchestrator(
                                     passedReview = false,
                                     revisionNote = vVerdict.revisionInstruction
                                 )
+                                if (visionAttempts > maxVisionRevisions) {
+                                    throw IllegalStateException("Vision AI permaneceu reprovada após $maxVisionRevisions revisão(ões): ${vVerdict.contradictionsOrGaps}")
+                                }
                                 currentVisionInstruction = "${plan.visionInstruction.ifBlank { userRequest }}\nCorreção exigida: ${vVerdict.revisionInstruction}"
                             }
                             _liveState.value = _liveState.value.copy(steps = steps.toList(), revisionCount = revisionCount)
@@ -299,9 +305,10 @@ class MultiAgentOrchestrator(
                                 source = source
                             )
                             val verdict = verdictRes.getOrNull()
-                            if (verdict == null || verdict.approved || attempt > maxRevisions) {
+                                ?: throw IllegalStateException("Reasoning AI não conseguiu avaliar a saída da Coding AI; a tarefa foi interrompida sem aprovação.")
+                            if (verdict.approved) {
                                 approved = true
-                                val note = verdict?.contradictionsOrGaps?.takeIf { it.isNotBlank() } ?: "Aprovado"
+                                val note = verdict.contradictionsOrGaps.takeIf { it.isNotBlank() } ?: "Aprovado"
                                 reviewNotes += "Coding AI avaliada: $note"
                                 steps += MultiAgentStep(
                                     stepIndex = steps.size + 1,
@@ -310,7 +317,7 @@ class MultiAgentOrchestrator(
                                     instruction = "Verificar coerência da Coding AI",
                                     outputSummary = note,
                                     durationMs = System.currentTimeMillis() - eStart,
-                                    passedReview = verdict?.approved ?: true
+                                    passedReview = true
                                 )
                             } else {
                                 revisionCount += 1
@@ -325,6 +332,9 @@ class MultiAgentOrchestrator(
                                     passedReview = false,
                                     revisionNote = verdict.revisionInstruction
                                 )
+                                if (attempt > maxRevisions) {
+                                    throw IllegalStateException("Coding AI permaneceu reprovada após $maxRevisions revisão(ões): ${verdict.contradictionsOrGaps}")
+                                }
                                 currentCodingInstruction = """
                                     Revise a sua resposta anterior com base na auditoria da Reasoning AI.
                                     Problemas apontados: ${verdict.contradictionsOrGaps}
@@ -338,6 +348,9 @@ class MultiAgentOrchestrator(
                                 steps = steps.toList(),
                                 revisionCount = revisionCount
                             )
+                        }
+                        if (!approved) {
+                            throw IllegalStateException("Coding AI não recebeu aprovação da Reasoning AI.")
                         }
                     }
 
