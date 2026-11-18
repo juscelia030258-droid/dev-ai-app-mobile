@@ -18,13 +18,20 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 @Serializable
+data class BrowserRequest(
+    val query: String,
+    val objective: String = ""
+)
+
+@Serializable
 data class OrchestrationPlan(
     val goalSummary: String,
     val useVision: Boolean = false,
     val useCoding: Boolean = false,
     val visionInstruction: String = "",
     val codingInstruction: String = "",
-    val acceptanceCriteria: List<String> = emptyList()
+    val acceptanceCriteria: List<String> = emptyList(),
+    val browserRequests: List<BrowserRequest> = emptyList()
 )
 
 @Serializable
@@ -50,6 +57,10 @@ class ReasoningAgent(
             - Selecionar quais agentes especialistas (Vision AI, Coding AI) devem atuar.
             - Avaliar criticamente resultados recebidos, detectar contradições e exigir revisões antes de aprovar.
             - Consolidar a resposta final coerente e verificada.
+            - Você também dispõe do Private Browser interno do LOCAL DEV AI. Ele pesquisa na web pública e lê o texto de páginas, sem depender do navegador do usuário.
+            - Quando a tarefa exigir informações atuais, pesquisa externa ou consulta a páginas, solicite até 3 browserRequests com consultas curtas e específicas.
+            - O navegador é somente leitura nesta versão: não faz login, não envia formulários, não compra, não publica e não executa ações em contas.
+            - Não invente resultados do navegador. Use somente o conteúdo retornado pelo módulo.
         """.trimIndent()
     }
 
@@ -161,12 +172,15 @@ class ReasoningAgent(
               "useCoding": true/false,
               "visionInstruction": "instrução objetiva para Vision AI se useVision=true",
               "codingInstruction": "instrução técnica objetiva para Coding AI se useCoding=true",
-              "acceptanceCriteria": ["critério 1", "critério 2"]
+              "acceptanceCriteria": ["critério 1", "critério 2"],
+              "browserRequests": [{"query": "consulta para pesquisar na web", "objective": "o que precisa descobrir"}]
             }
             Contexto disponível:
             - Imagem anexada: $hasImage
             - Vision AI habilitada: $visionEnabled
             - Coding AI habilitada: $codingEnabled
+            - Private Browser disponível: sim
+            - Use browserRequests vazio quando a web não for necessária; não pesquise só por hábito.
 
             Solicitação do usuário:
             $userRequest
