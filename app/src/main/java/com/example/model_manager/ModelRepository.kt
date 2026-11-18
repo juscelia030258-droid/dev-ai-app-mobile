@@ -405,7 +405,7 @@ class ModelRepository(
                 destFile.delete()
                 throw IllegalStateException("Download cancelado pelo usuário.")
             }
-            return digest.digest().joinToString("") { "%02x".format(it) }.take(16)
+            return digest.digest().joinToString("") { "%02x".format(it) }
         }
     }
 
@@ -425,7 +425,7 @@ class ModelRepository(
                 out.flush()
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }.take(16)
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun resolveDisplayName(uri: Uri): String? {
