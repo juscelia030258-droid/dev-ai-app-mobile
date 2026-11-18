@@ -233,7 +233,9 @@ class OpenAiApiServer(
         activeConnectionsCounter.incrementAndGet()
         syncCounters()
         try {
-            val payload = OpenAiModelsResponse(data = buildOpenAiModelsList())
+            val payload = OpenAiModelsResponse(
+                data = buildOpenAiModelsList().filter { auth.permission.allows(it.id) }
+            )
             call.respondText(
                 text = json.encodeToString(payload),
                 contentType = ContentType.Application.Json,
@@ -282,6 +284,25 @@ class OpenAiApiServer(
                     latencyMs = System.currentTimeMillis() - startMs,
                     streaming = false,
                     summary = "Modelo não encontrado"
+                )
+            } else if (!auth.permission.allows(found.id)) {
+                respondOpenAiError(
+                    call,
+                    HttpStatusCode.Forbidden,
+                    "A chave '${auth.keyEntity.name}' não possui permissão para o modelo '${found.id}'.",
+                    "permission_error",
+                    "insufficient_key_scope"
+                )
+                logRequest(
+                    method = "GET",
+                    path = "/v1/models/$rawModelId",
+                    model = found.id,
+                    remoteIp = call.request.origin.remoteHost,
+                    keyName = auth.keyEntity.name,
+                    statusCode = 403,
+                    latencyMs = System.currentTimeMillis() - startMs,
+                    streaming = false,
+                    summary = "Escopo negado"
                 )
             } else {
                 call.respondText(
