@@ -405,6 +405,14 @@ class ModelRepository(
                 destFile.delete()
                 throw IllegalStateException("Download cancelado pelo usuário.")
             }
+            // A successful HTTP status does not guarantee the entire model arrived.
+            // Reject truncated files whenever the server supplied a Content-Length.
+            if (totalBytes > 0L && bytesRead != totalBytes) {
+                destFile.delete()
+                throw IllegalStateException(
+                    "Download incompleto de $fileName: recebidos $bytesRead de $totalBytes bytes."
+                )
+            }
             return digest.digest().joinToString("") { "%02x".format(it) }
         }
     }
