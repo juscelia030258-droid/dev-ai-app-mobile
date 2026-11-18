@@ -27,8 +27,10 @@ class DeviceProfiler(private val context: Context) {
         val effectiveAvailCapMb = max(512L, availRamMb - 768L)
         val computedSafeBudget = minOf(hardwareSafeMaxMb, effectiveAvailCapMb + 1024L)
             .coerceAtMost(hardwareSafeMaxMb)
+        // The user's limit is a ceiling, not permission to ignore current free RAM.
+        // Always respect both the configured cap and the dynamically computed safe budget.
         val finalBudgetMb = if (userRamLimitMb != null && userRamLimitMb > 512L) {
-            minOf(userRamLimitMb, hardwareSafeMaxMb)
+            minOf(userRamLimitMb, computedSafeBudget)
         } else {
             computedSafeBudget
         }
