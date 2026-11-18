@@ -122,6 +122,7 @@ class LlamaCppRuntime(
         currentModel = null
         loadedContextLength = 0
         if (helper != null) {
+            runCatching { helper.abort() }
             runCatching { helper.stopPrediction() }
             runCatching { helper.release() }
         }
@@ -206,9 +207,14 @@ class LlamaCppRuntime(
         }
 
         try {
+            val imageUri = imagePath?.let { raw ->
+                val parsed = Uri.parse(raw)
+                if (parsed.scheme.isNullOrBlank()) Uri.fromFile(File(raw)).toString()
+                else parsed.toString()
+            }
             helper.predict(
                 prompt = formattedPrompt,
-                imagePath = imagePath
+                imagePath = imageUri
             )
         } catch (t: Throwable) {
             if (finished.compareAndSet(false, true)) {
