@@ -27,12 +27,9 @@ class LlamaCppRuntime(
     override val backend: RuntimeBackend = RuntimeBackend.LLAMA_CPP
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val eventFlow = MutableSharedFlow<LlamaHelper.LLMEvent>(
-        replay = 0,
-        extraBufferCapacity = 256,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-
+    // Each helper gets an isolated event stream. A shared stream can leak stale
+    // Loaded/Error/Done events across model swaps and falsely complete a load.
+    private var currentEventFlow: MutableSharedFlow<LlamaHelper.LLMEvent>? = null
     private var llamaHelper: LlamaHelper? = null
     private var currentModel: LocalModelEntity? = null
     private var loadedContextLength: Int = 0
@@ -62,16 +59,22 @@ class LlamaCppRuntime(
 
         unloadModel()
 
+        val modelEvents = MutableSharedFlow<LlamaHelper.LLMEvent>(
+            replay = 0,
+            extraBufferCapacity = 256,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST
+        )
         val helper = LlamaHelper(
             contentResolver = context.contentResolver,
             scope = scope,
-            sharedFlow = eventFlow
+            sharedFlow = modelEvents
         )
         val loadedSignal = CompletableDeferred<Unit>()
 
-        // UNDISPATCHED guarantees subscription starts synchronously before helper.load() emits events
+        // Subscribe before load. Only this helper's own Loaded/Error events may
+        // complete this load operation; progress callbacks are not proof of readiness.
         val observerJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            eventFlow.collect { ev ->
+            modelEvents.collect { ev ->
                 when (ev) {
                     is LlamaHelper.LLMEvent.Loaded -> {
                         if (!loadedSignal.isCompleted) loadedSignal.complete(Unit)
@@ -92,12 +95,13 @@ class LlamaCppRuntime(
                 contextLength = targetCtx,
                 mmprojPath = mmprojFile?.absolutePath
             ) { _ ->
-                if (!loadedSignal.isCompleted) loadedSignal.complete(Unit)
+                // The library callback is progress-only; wait for LLMEvent.Loaded.
             }
             withTimeout(90_000L) {
                 loadedSignal.await()
             }
             llamaHelper = helper
+            currentEventFlow = modelEvents
             currentModel = model
             loadedContextLength = targetCtx
         } catch (t: Throwable) {
@@ -111,6 +115,7 @@ class LlamaCppRuntime(
     override suspend fun unloadModel() {
         val helper = llamaHelper
         llamaHelper = null
+        currentEventFlow = null
         currentModel = null
         loadedContextLength = 0
         if (helper != null) {
@@ -126,7 +131,8 @@ class LlamaCppRuntime(
     ): Flow<InferenceStreamEvent> = callbackFlow {
         val helper = llamaHelper
         val model = currentModel
-        if (helper == null || model == null) {
+        val modelEvents = currentEventFlow
+        if (helper == null || model == null || modelEvents == null) {
             trySend(InferenceStreamEvent.Failed("Nenhum modelo GGUF carregado no runtime llama.cpp."))
             close()
             return@callbackFlow
@@ -148,7 +154,7 @@ class LlamaCppRuntime(
 
         // UNDISPATCHED guarantees subscription is active before helper.predict() fires any event
         val collectorJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            eventFlow.collect { ev ->
+            modelEvents.collect { ev ->
                 if (finished.get()) return@collect
                 when (ev) {
                     is LlamaHelper.LLMEvent.Started -> {
