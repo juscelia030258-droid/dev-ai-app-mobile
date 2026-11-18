@@ -220,23 +220,28 @@ class InferenceRuntimeManager(
             }
         }
 
-        val footprintMb = memoryBudgetManager.estimateGgufFootprintMb(model.sizeBytes, targetCtx)
-        val currentlyLoadedMb = memoryBudgetManager.state.value.estimatedModelsRamMb
+        val mmprojBytes = model.mmprojPath?.let { java.io.File(it).takeIf(File::exists)?.length() } ?: 0L
+        val footprintMb = memoryBudgetManager.estimateGgufFootprintMb(
+            fileSizeBytes = model.sizeBytes,
+            contextLength = targetCtx,
+            mmprojSizeBytes = mmprojBytes
+        )
 
-        // Always unload previous model before loading another to protect 8 GB Galaxy A56 RAM
-        val hadOtherModel = activeModelEntity != null
+        // Unload first, then measure free RAM. Measuring before eviction makes the
+        // old model reduce the new model's budget even though it is about to be freed.
+        if (activeModelEntity != null) {
+            val prevName = activeModelEntity?.name ?: "anterior"
+            unloadCurrentLocked("Descarregado '$prevName' para dar lugar a '${model.name}'")
+            memoryBudgetManager.refreshProfile()
+        }
+
         val (fits, memReason) = memoryBudgetManager.checkCanFitModel(
             requestedFootprintMb = footprintMb,
-            currentlyLoadedMb = currentlyLoadedMb,
+            currentlyLoadedMb = 0L,
             willUnloadOthers = true
         )
         if (!fits) {
             return Result.failure(IllegalStateException(memReason ?: "Limite de RAM excedido."))
-        }
-
-        if (hadOtherModel) {
-            val prevName = activeModelEntity?.name ?: "anterior"
-            unloadCurrentLocked("Descarregado '$prevName' para dar lugar a '${model.name}'")
         }
 
         updateAgentState(role, AgentRuntimeState.LOADING_MODEL)
