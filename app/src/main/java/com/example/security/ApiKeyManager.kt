@@ -273,8 +273,12 @@ class ApiKeyManager(
                     // Verify AndroidKeyStore provider is reachable
                     KeyStore.getInstance("AndroidKeyStore")
                     AndroidKeystoreCipher()
-                } catch (_: Exception) {
-                    RobolectricFallbackCipher()
+                } catch (error: Exception) {
+                    // Never fall back to the deterministic test key on a real Android device.
+                    throw IllegalStateException(
+                        "Android Keystore indisponível. Por segurança, o armazenamento de chaves API foi bloqueado.",
+                        error
+                    )
                 }
             }
         }
