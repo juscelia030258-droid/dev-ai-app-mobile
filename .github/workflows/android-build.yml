@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# Keep only the newest build for a branch; older commits are superseded.
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build Debug APK
