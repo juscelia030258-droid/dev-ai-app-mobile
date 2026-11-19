@@ -191,7 +191,7 @@ class PrivateBrowser(context: Context) {
                 }
                 webView.loadUrl(url)
             }
-            result.await()
+            return result.await()
         } finally {
             withContext(Dispatchers.Main) {
                 webView.stopLoading()
