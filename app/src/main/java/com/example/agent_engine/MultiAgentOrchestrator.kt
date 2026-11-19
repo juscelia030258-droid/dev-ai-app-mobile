@@ -67,6 +67,16 @@ class MultiAgentOrchestrator(
         activeExecutionJob?.cancel()
     }
 
+    /** Marks unfinished journal entries from a previous process as interrupted, preserving their checkpoints. */
+    suspend fun recoverInterruptedTasks() {
+        multiAgentRunDao.getInterruptedCandidates().forEach { run ->
+            multiAgentRunDao.markInterrupted(
+                run.taskId,
+                "O aplicativo foi encerrado antes da conclusão. O plano e as etapas salvas foram preservados para consulta; execute uma nova tarefa para continuar."
+            )
+        }
+    }
+
     suspend fun executeMultiAgentTask(
         userRequest: String,
         imagePath: String? = null,
@@ -190,6 +200,9 @@ class MultiAgentOrchestrator(
                     _liveState.value = _liveState.value.copy(plan = plan, steps = steps.toList())
                     persistProgress(taskId, userRequest, source, "RUNNING", plan, steps, revisionCount, "")
 
+                    // Checkpoint after browser research so a process interruption does not erase the collected evidence.
+                    persistProgress(taskId, userRequest, source, "RUNNING", plan, steps, revisionCount, "")
+
                     var visionOutput: String? = null
                     var codingOutput: String? = null
                     val reviewNotes = mutableListOf<String>()
@@ -309,6 +322,9 @@ class MultiAgentOrchestrator(
                         }
                     }
 
+                    // Save the visual analysis and review before moving to code generation.
+                    persistProgress(taskId, userRequest, source, "RUNNING", plan, steps, revisionCount, "")
+
                     // Phase 3: Coding AI + Reasoning Critic Revision Loop (bounded by maxRevisions)
                     if (plan.useCoding) {
                         var currentCodingInstruction = buildString {
@@ -427,6 +443,9 @@ class MultiAgentOrchestrator(
                         }
                     }
 
+                    // Save Coding AI output and its review before final synthesis.
+                    persistProgress(taskId, userRequest, source, "RUNNING", plan, steps, revisionCount, "")
+
                     // Phase 4: Consolidate Final Answer
                     _liveState.value = _liveState.value.copy(
                         currentPhase = "Reasoning AI consolidando resposta final",
@@ -454,6 +473,9 @@ class MultiAgentOrchestrator(
                         durationMs = System.currentTimeMillis() - synStart,
                         passedReview = true
                     )
+
+                    // Final checkpoint: persist the complete journal before marking the task completed.
+                    persistProgress(taskId, userRequest, source, "RUNNING", plan, steps, revisionCount, finalText)
 
                     val entity = MultiAgentRunEntity(
                         taskId = taskId,
