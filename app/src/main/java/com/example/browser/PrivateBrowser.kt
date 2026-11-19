@@ -19,6 +19,7 @@ import java.util.Locale
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
 
 data class BrowserPage(
     val requestedUrl: String,
@@ -103,8 +104,8 @@ class PrivateBrowser(context: Context) {
             withContext(Dispatchers.Main) {
                 webView.webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                        val target = request?.url?.toString() ?: return true
-                        val scheme = request.url.scheme?.lowercase(Locale.ROOT)
+                        val targetUri = request?.url ?: return true
+                        val scheme = targetUri.scheme?.lowercase(Locale.ROOT)
                         // Prevent redirects and page links from escaping to app/file/custom schemes.
                         return scheme != "https" && scheme != "http"
                     }
@@ -124,7 +125,7 @@ class PrivateBrowser(context: Context) {
                         """.trimIndent()
                         view?.evaluateJavascript(script) { raw ->
                             if (result.isCompleted) return@evaluateJavascript
-                            val decoded = decodeJsString(raw.orEmpty())
+                            val decoded = runCatching { Json.parseToJsonElement(raw.orEmpty()).jsonPrimitive.content }.getOrDefault("")
                             val fields = Regex("\\{.*}", RegexOption.DOT_MATCHES_ALL).find(decoded)?.value
                             val title = jsonField(fields, "title")
                             val finalUrl = jsonField(fields, "url").ifBlank { finishedUrl.orEmpty() }
