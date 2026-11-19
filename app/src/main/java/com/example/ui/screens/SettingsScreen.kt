@@ -109,7 +109,7 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Física: ${memoryState.profile.totalRamMb} MB • Orçamento seguro: ${memoryState.profile.safeInferenceBudgetMb} MB",
+                    text = "Orçamento do modelo: ${memoryState.profile.modelSafeBudgetMb} MB • RAM livre do Android: ${memoryState.profile.availableRamMb} MB • Pressão: ${memoryState.profile.systemMemoryPressureLabel}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
