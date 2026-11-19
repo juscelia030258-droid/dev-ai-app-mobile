@@ -21,6 +21,7 @@ import java.net.InetAddress
 import java.net.URI
 import java.io.File
 import java.io.FileOutputStream
+import java.io.ByteArrayInputStream
 import java.util.Locale
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -112,6 +113,33 @@ class PrivateBrowser(context: Context) {
             withContext(Dispatchers.Main) {
                 val allowedHost = URI(url).host?.lowercase(Locale.ROOT)
                 webView.webViewClient = object : WebViewClient() {
+                    // Enforce read-only browsing and block private-network targets for every
+                    // subresource/XHR request, not only top-level navigation.
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): android.webkit.WebResourceResponse? {
+                        val target = request?.url ?: return blockedResponse("Requisição inválida.")
+                        val scheme = target.scheme?.lowercase(Locale.ROOT)
+                        if (scheme != "https" && scheme != "http") {
+                            return blockedResponse("Esquema de URL bloqueado.")
+                        }
+                        if (!request.method.equals("GET", ignoreCase = true)) {
+                            return blockedResponse("O Private Browser permite somente requisições GET.")
+                        }
+                        val host = target.host?.lowercase(Locale.ROOT)?.trimEnd('.')
+                            ?: return blockedResponse("Host inválido.")
+                        if (host == "localhost" || host.endsWith(".localhost")) {
+                            return blockedResponse("Acesso a host local bloqueado.")
+                        }
+                        val addresses = runCatching { InetAddress.getAllByName(host).toList() }
+                            .getOrElse { return blockedResponse("Não foi possível validar o destino.") }
+                        if (addresses.isEmpty() || addresses.any { !isPublicAddress(it) }) {
+                            return blockedResponse("Acesso a rede privada ou reservada bloqueado.")
+                        }
+                        return null
+                    }
+
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         val targetUri = request?.url ?: return true
                         val scheme = targetUri.scheme?.lowercase(Locale.ROOT)
@@ -173,6 +201,16 @@ class PrivateBrowser(context: Context) {
             }
         }
     }
+
+    private fun blockedResponse(message: String) =
+        android.webkit.WebResourceResponse(
+            "text/plain",
+            "UTF-8",
+            403,
+            "Forbidden",
+            emptyMap(),
+            ByteArrayInputStream(message.toByteArray(Charsets.UTF_8))
+        )
 
     private fun captureScreenshot(webView: WebView): String? = runCatching {
         val width = 720
