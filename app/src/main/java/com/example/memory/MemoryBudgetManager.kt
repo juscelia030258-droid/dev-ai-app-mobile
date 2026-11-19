@@ -25,6 +25,8 @@ data class MemoryStatusState(
     val lastEvictionReason: String? = null
 )
 
+private const val SYSTEM_MEMORY_HEADROOM_MB = 768L
+
 class MemoryBudgetManager(
     private val deviceProfiler: DeviceProfiler
 ) {
