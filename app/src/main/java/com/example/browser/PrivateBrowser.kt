@@ -2,6 +2,9 @@ package com.example.browser
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -15,6 +18,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.net.InetAddress
 import java.net.URI
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -26,6 +31,7 @@ data class BrowserPage(
     val finalUrl: String,
     val title: String,
     val text: String,
+    val screenshotPath: String? = null,
     val capturedAt: Long = System.currentTimeMillis()
 )
 
@@ -133,7 +139,8 @@ class PrivateBrowser(context: Context) {
                             if (text.isBlank() && title.isBlank()) {
                                 result.completeExceptionally(IllegalStateException("A página abriu, mas não foi possível extrair seu conteúdo."))
                             } else {
-                                result.complete(BrowserPage(url, finalUrl, title, text))
+                                val screenshot = view?.let { captureScreenshot(it) }
+                                result.complete(BrowserPage(url, finalUrl, title, text, screenshot))
                             }
                         } ?: result.completeExceptionally(IllegalStateException("WebView não conseguiu ler a página."))
                     }
@@ -162,6 +169,24 @@ class PrivateBrowser(context: Context) {
             }
         }
     }
+
+    private fun captureScreenshot(webView: WebView): String? = runCatching {
+        val width = 720
+        val height = 1280
+        webView.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+        )
+        webView.layout(0, 0, width, height)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        webView.draw(Canvas(bitmap))
+        val output = File(appContext.cacheDir, "private_browser_${System.currentTimeMillis()}.jpg")
+        FileOutputStream(output).use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 78, stream)
+        }
+        bitmap.recycle()
+        output.absolutePath
+    }.getOrNull()
 
     private fun jsonField(json: String?, key: String): String {
         if (json.isNullOrBlank()) return ""
