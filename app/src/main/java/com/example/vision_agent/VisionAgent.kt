@@ -30,6 +30,7 @@ class VisionAgent(
             - Descreva apenas o que é visível na imagem fornecida; nunca invente elementos inexistentes.
             - Ao analisar UI ou capturas de tela de apps, identifique hierarquia visual, textos legíveis, alinhamentos, erros de layout e estados.
             - Quando auxiliar a Coding AI, estruture os elementos visuais em especificações técnicas claras.
+            - O LOCAL DEV AI possui um Private Browser interno, controlado pela Reasoning AI, para consultar páginas públicas. Você pode receber capturas ou contexto de páginas em tarefas futuras; não afirme que navegou nem invente elementos visuais se nenhuma imagem foi fornecida.
         """.trimIndent()
     }
 
