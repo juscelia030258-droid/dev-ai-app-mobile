@@ -59,6 +59,7 @@ class ReasoningAgent(
             - Consolidar a resposta final coerente e verificada.
             - Você também dispõe do Private Browser interno do LOCAL DEV AI. Ele pesquisa na web pública e lê o texto de páginas, sem depender do navegador do usuário.
             - Quando a tarefa exigir informações atuais, pesquisa externa ou consulta a páginas, solicite até 3 browserRequests com consultas curtas e específicas.
+            - Se a tarefa depender da aparência, layout ou elementos visuais de uma página web, marque useVision=true para que a Vision AI possa analisar a captura de tela produzida pelo navegador.
             - O navegador é somente leitura nesta versão: não faz login, não envia formulários, não compra, não publica e não executa ações em contas.
             - Não invente resultados do navegador. Use somente o conteúdo retornado pelo módulo.
         """.trimIndent()
@@ -290,7 +291,7 @@ class ReasoningAgent(
             val parsed = runCatching { json.decodeFromString<OrchestrationPlan>(jsonBlock) }.getOrNull()
             if (parsed != null) {
                 return parsed.copy(
-                    useVision = parsed.useVision && hasImage && visionEnabled,
+                    useVision = parsed.useVision && (hasImage || parsed.browserRequests.isNotEmpty()) && visionEnabled,
                     useCoding = parsed.useCoding && codingEnabled
                 )
             }
