@@ -108,6 +108,8 @@ class AppContainer(context: Context) {
     init {
         networkDiscovery.startMonitoring()
         appScope.launch {
+            // Recover task journals left in RUNNING state by a previous process.
+            multiAgentOrchestrator.recoverInterruptedTasks()
             // Ensure permanent primary API key is generated once and preserved forever until rotated/revoked
             apiKeyManager.ensurePermanentPrimaryKey()
             // Ensure default configurations exist for all 3 distinct agents
