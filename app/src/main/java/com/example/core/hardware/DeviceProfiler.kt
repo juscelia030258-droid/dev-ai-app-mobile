@@ -10,6 +10,7 @@ import android.os.StatFs
 import com.example.core.model.DeviceHardwareProfile
 import kotlin.math.max
 
+private const val MIN_MODEL_BUDGET_MB = 3277L
 private const val MAX_SAFE_INFERENCE_BUDGET_MB = 3584L
 
 class DeviceProfiler(private val context: Context) {
@@ -29,10 +30,14 @@ class DeviceProfiler(private val context: Context) {
         // Model budget depends on physical device capacity and the user's model-only cap.
         // Free RAM from Android/background apps is tracked separately as system pressure.
         val hardwareModelBudgetMb = minOf(hardwareSafeMaxMb, MAX_SAFE_INFERENCE_BUDGET_MB)
-        val finalModelBudgetMb = if (userRamLimitMb != null && userRamLimitMb > 512L) {
-            minOf(userRamLimitMb, hardwareModelBudgetMb)
+        val requestedModelCapMb = (userRamLimitMb ?: MAX_SAFE_INFERENCE_BUDGET_MB).coerceAtLeast(512L)
+        val cappedModelBudgetMb = minOf(requestedModelCapMb, hardwareModelBudgetMb)
+        // When the user selects a 4 GB ceiling, target at least 3.2 GiB if
+        // the device's physical hardware reserve allows it. System pressure is checked separately.
+        val finalModelBudgetMb = if (requestedModelCapMb >= MIN_MODEL_BUDGET_MB && hardwareSafeMaxMb >= MIN_MODEL_BUDGET_MB) {
+            cappedModelBudgetMb.coerceAtLeast(MIN_MODEL_BUDGET_MB)
         } else {
-            hardwareModelBudgetMb
+            cappedModelBudgetMb
         }
         val systemMemoryPressureLabel = when {
             availRamMb < 1024L -> "Crítica"
