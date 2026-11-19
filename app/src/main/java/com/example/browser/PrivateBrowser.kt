@@ -11,6 +11,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -48,11 +49,13 @@ class PrivateBrowser(context: Context) {
         openAndRead("https://html.duckduckgo.com/html/?q=" + java.net.URLEncoder.encode(query.take(200), "UTF-8"))
 
     suspend fun openAndRead(url: String): Result<BrowserPage> = mutex.withLock {
-        runCatching {
+        try {
             val safeUrl = validatePublicUrl(url)
-            withTimeout(30_000L) {
-                browseOnMain(safeUrl)
-            }
+            Result.success(withTimeout(30_000L) { browseOnMain(safeUrl) })
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            Result.failure(error)
         }
     }
 
