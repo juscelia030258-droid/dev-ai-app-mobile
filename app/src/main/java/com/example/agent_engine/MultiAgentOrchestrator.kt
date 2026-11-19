@@ -141,8 +141,12 @@ class MultiAgentOrchestrator(
                                 onSuccess = { page ->
                                     browserEvidence.appendLine("Pesquisa: $query")
                                     browserEvidence.appendLine("Objetivo: ${request.objective.take(240)}")
-                                    browserEvidence.appendLine("Página: ${page.title} — ${page.finalUrl}")
-                                    browserEvidence.appendLine(page.text.take(6500))
+                                    browserEvidence.appendLine("Pesquisa: ${page.title}")
+                                    browserEvidence.appendLine("Página de resultados: ${page.finalUrl}")
+                                    page.links.take(3).forEach { link ->
+                                        browserEvidence.appendLine("Fonte: ${link.title} — ${link.url}")
+                                    }
+                                    browserEvidence.appendLine(page.text.take(12000))
                                     browserEvidence.appendLine()
                                     if (browserScreenshotPath == null) browserScreenshotPath = page.screenshotPath
                                     steps += MultiAgentStep(
@@ -367,7 +371,7 @@ class MultiAgentOrchestrator(
                             )
                             val eStart = System.currentTimeMillis()
                             val verdictRes = reasoningAgent.evaluateSpecialistOutput(
-                                originalRequest = userRequest,
+                                originalRequest = enrichedRequest,
                                 plan = plan,
                                 agentRole = AgentRole.CODING,
                                 specialistOutput = candidateCoding,
