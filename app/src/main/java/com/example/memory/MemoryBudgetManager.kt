@@ -58,7 +58,7 @@ class MemoryBudgetManager(
         willUnloadOthers: Boolean
     ): Pair<Boolean, String?> = mutex.withLock {
         val profile = deviceProfiler.captureProfile(ramLimitMb)
-        val effectiveBudget = minOf(ramLimitMb, profile.safeInferenceBudgetMb)
+        val effectiveBudget = minOf(ramLimitMb, profile.modelSafeBudgetMb)
         // Sequential inference: when switching agents, the previous runtime is unloaded
         // before this check. Only the incoming active model consumes the model budget.
         // Keep the additive path only for any future runtime that explicitly keeps models resident.
@@ -68,10 +68,11 @@ class MemoryBudgetManager(
             currentlyLoadedMb + requestedFootprintMb
         }
 
-        return@withLock if (projectedMb > effectiveBudget) {
-            false to "Memória insuficiente para carregar este modelo ativo: exige ~${requestedFootprintMb} MB, orçamento seguro disponível é ${effectiveBudget} MB (RAM livre: ${profile.availableRamMb} MB). Os outros modelos não são somados porque são descarregados na troca."
-        } else {
-            true to null
+        when {
+            projectedMb > effectiveBudget -> false to "O modelo exige ~${requestedFootprintMb} MB, acima do orçamento exclusivo do modelo (${effectiveBudget} MB)."
+            profile.availableRamMb < requestedFootprintMb + SYSTEM_MEMORY_HEADROOM_MB ->
+                false to "Pressão de memória do Android: RAM física disponível ${profile.availableRamMb} MB; são necessários ${requestedFootprintMb + SYSTEM_MEMORY_HEADROOM_MB} MB livres para carregar com ${SYSTEM_MEMORY_HEADROOM_MB} MB de margem. Feche apps externos ou tente novamente."
+            else -> true to null
         }
     }
 
