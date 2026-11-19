@@ -205,7 +205,15 @@ class InferenceRuntimeManager(
     ): Result<LoadedModelSnapshot> {
         val format = runCatching { ModelFormat.valueOf(model.format) }.getOrDefault(ModelFormat.GGUF)
         val targetRuntime = selectCompatibleRuntime(format, preferredBackend)
-        val targetCtx = params.contextLength.coerceIn(512, 8192)
+        val requestedCtx = params.contextLength.coerceIn(512, 8192)
+        var targetCtx = requestedCtx
+        val contextCandidates = if (format == ModelFormat.GGUF) {
+            listOf(requestedCtx, 3072, 2048, 1536, 1024, 512)
+                .filter { it <= requestedCtx }
+                .distinct()
+        } else {
+            listOf(requestedCtx)
+        }
 
         if (
             activeModelEntity?.id == model.id &&
@@ -221,11 +229,6 @@ class InferenceRuntimeManager(
         }
 
         val mmprojBytes = model.mmprojPath?.let { java.io.File(it).takeIf { file -> file.exists() }?.length() } ?: 0L
-        val footprintMb = memoryBudgetManager.estimateGgufFootprintMb(
-            fileSizeBytes = model.sizeBytes,
-            contextLength = targetCtx,
-            mmprojSizeBytes = mmprojBytes
-        )
 
         // Unload first, then measure free RAM. Measuring before eviction makes the
         // old model reduce the new model's budget even though it is about to be freed.
@@ -235,23 +238,73 @@ class InferenceRuntimeManager(
             memoryBudgetManager.refreshProfile()
         }
 
-        val (fits, memReason) = memoryBudgetManager.checkCanFitModel(
-            requestedFootprintMb = footprintMb,
-            currentlyLoadedMb = 0L,
-            willUnloadOthers = true
-        )
-        if (!fits) {
-            return Result.failure(IllegalStateException(memReason ?: "Limite de RAM excedido."))
+        var footprintMb = 0L
+        var lastMemoryReason: String? = null
+        var selectedContext = false
+        for (candidateContext in contextCandidates) {
+            val candidateFootprint = memoryBudgetManager.estimateGgufFootprintMb(
+                fileSizeBytes = model.sizeBytes,
+                contextLength = candidateContext,
+                mmprojSizeBytes = mmprojBytes
+            )
+            val (fitsCandidate, reason) = memoryBudgetManager.checkCanFitModel(
+                requestedFootprintMb = candidateFootprint,
+                currentlyLoadedMb = 0L,
+                willUnloadOthers = true
+            )
+            if (fitsCandidate) {
+                targetCtx = candidateContext
+                footprintMb = candidateFootprint
+                selectedContext = true
+                break
+            }
+            lastMemoryReason = reason
+        }
+        if (!selectedContext) {
+            return Result.failure(
+                IllegalStateException(
+                    lastMemoryReason ?: "Não há memória suficiente para carregar o modelo, mesmo com contexto reduzido."
+                )
+            )
         }
 
         updateAgentState(role, AgentRuntimeState.LOADING_MODEL)
 
-        val loadResult = try {
-            targetRuntime.loadModel(model, params)
+        var loadResult = try {
+            targetRuntime.loadModel(model, params.copy(contextLength = targetCtx))
         } catch (oom: OutOfMemoryError) {
             runCatching { targetRuntime.unloadModel() }
-            unloadCurrentLocked("Recuperação de falta de memória (OOM)")
-            Result.failure(IllegalStateException("Falta de memória (OOM) ao carregar ${model.name}. Reduza o contexto ou use quantização menor."))
+            Result.failure(IllegalStateException("Falta de memória (OOM) ao carregar ${model.name}."))
+        }
+
+        // Native allocation can exceed the estimate. Retry GGUF with progressively
+        // smaller contexts before reporting OOM; model weights and quantization stay unchanged.
+        if (loadResult.isFailure && format == ModelFormat.GGUF) {
+            for (fallbackContext in contextCandidates.filter { it < targetCtx }) {
+                runCatching { targetRuntime.unloadModel() }
+                val fallbackFootprint = memoryBudgetManager.estimateGgufFootprintMb(
+                    fileSizeBytes = model.sizeBytes,
+                    contextLength = fallbackContext,
+                    mmprojSizeBytes = mmprojBytes
+                )
+                val (fitsFallback, _) = memoryBudgetManager.checkCanFitModel(
+                    requestedFootprintMb = fallbackFootprint,
+                    currentlyLoadedMb = 0L,
+                    willUnloadOthers = true
+                )
+                if (!fitsFallback) continue
+                loadResult = try {
+                    targetRuntime.loadModel(model, params.copy(contextLength = fallbackContext))
+                } catch (oom: OutOfMemoryError) {
+                    runCatching { targetRuntime.unloadModel() }
+                    Result.failure(IllegalStateException("OOM ao tentar contexto de ${fallbackContext} tokens."))
+                }
+                if (loadResult.isSuccess) {
+                    targetCtx = fallbackContext
+                    footprintMb = fallbackFootprint
+                    break
+                }
+            }
         }
 
         // A failed native initialization may still hold partial resources. Release
