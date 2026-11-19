@@ -26,6 +26,7 @@ import java.util.Locale
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonArray
 
 data class BrowserPage(
     val requestedUrl: String,
@@ -33,7 +34,13 @@ data class BrowserPage(
     val title: String,
     val text: String,
     val screenshotPath: String? = null,
-    val capturedAt: Long = System.currentTimeMillis()
+    val capturedAt: Long = System.currentTimeMillis(),
+    val links: List<BrowserLink> = emptyList()
+)
+
+data class BrowserLink(
+    val title: String,
+    val url: String
 )
 
 /**
@@ -45,8 +52,35 @@ class PrivateBrowser(context: Context) {
     private val appContext = context.applicationContext
     private val mutex = Mutex()
 
-    suspend fun searchAndRead(query: String): Result<BrowserPage> =
-        openAndRead("https://html.duckduckgo.com/html/?q=" + java.net.URLEncoder.encode(query.take(200), "UTF-8"))
+    suspend fun searchAndRead(query: String): Result<BrowserPage> {
+        val searchUrl = "https://html.duckduckgo.com/html/?q=" +
+            java.net.URLEncoder.encode(query.take(200), "UTF-8")
+        val searchPage = openAndRead(searchUrl).getOrElse { return Result.failure(it) }
+        val sourcePages = mutableListOf<BrowserPage>()
+        for (link in searchPage.links.take(8)) {
+            val source = openAndRead(link.url).getOrNull()
+            if (source != null && source.text.isNotBlank()) sourcePages += source
+            if (sourcePages.size >= 2) break
+        }
+        if (sourcePages.isEmpty()) return Result.success(searchPage)
+        val combined = buildString {
+            appendLine("Resumo da página de resultados:")
+            appendLine(searchPage.text.take(2500))
+            sourcePages.forEachIndexed { index, page ->
+                appendLine()
+                appendLine("FONTE ${index + 1}: ${page.title}")
+                appendLine("URL: ${page.finalUrl}")
+                appendLine(page.text.take(5500))
+            }
+        }.take(16000)
+        return Result.success(
+            searchPage.copy(
+                title = "Pesquisa: $query",
+                text = combined,
+                links = sourcePages.map { BrowserLink(it.title, it.finalUrl) }
+            )
+        )
+    }
 
     suspend fun openAndRead(url: String): Result<BrowserPage> = mutex.withLock {
         try {
@@ -154,25 +188,36 @@ class PrivateBrowser(context: Context) {
                             (function() {
                               const clean = document.cloneNode(true);
                               clean.querySelectorAll('script,style,noscript,svg,canvas,nav,footer,header,form').forEach(e => e.remove());
+                              const links = Array.from(document.querySelectorAll('a.result__a'))
+                                .slice(0, 8)
+                                .map(a => ({title: (a.innerText || '').trim(), href: a.href || ''}))
+                                .filter(a => a.title && a.href);
                               return JSON.stringify({
                                 title: document.title || '',
                                 url: location.href || '',
-                                text: (clean.body ? clean.body.innerText : '').slice(0, 18000)
+                                text: (clean.body ? clean.body.innerText : '').slice(0, 18000),
+                                links: links
                               });
                             })();
                         """.trimIndent()
                         view?.evaluateJavascript(script) { raw ->
                             if (result.isCompleted) return@evaluateJavascript
                             val decoded = runCatching { Json.parseToJsonElement(raw.orEmpty()).jsonPrimitive.content }.getOrDefault("")
-                            val fields = Regex("\\{.*}", RegexOption.DOT_MATCHES_ALL).find(decoded)?.value
-                            val title = jsonField(fields, "title")
-                            val finalUrl = jsonField(fields, "url").ifBlank { finishedUrl.orEmpty() }
-                            val text = jsonField(fields, "text")
+                            val documentJson = runCatching { Json.parseToJsonElement(decoded).jsonObject }.getOrNull()
+                            val title = documentJson?.get("title")?.jsonPrimitive?.content.orEmpty()
+                            val finalUrl = documentJson?.get("url")?.jsonPrimitive?.content.orEmpty().ifBlank { finishedUrl.orEmpty() }
+                            val text = documentJson?.get("text")?.jsonPrimitive?.content.orEmpty()
+                            val links = documentJson?.get("links")?.jsonArray?.mapNotNull { item ->
+                                val link = item.jsonObject
+                                val label = link["title"]?.jsonPrimitive?.content.orEmpty().trim()
+                                val href = normalizeSearchResultUrl(link["href"]?.jsonPrimitive?.content.orEmpty())
+                                if (label.isNotBlank() && href != null) BrowserLink(label.take(160), href) else null
+                            }.orEmpty()
                             if (text.isBlank() && title.isBlank()) {
                                 result.completeExceptionally(IllegalStateException("A página abriu, mas não foi possível extrair seu conteúdo."))
                             } else {
                                 val screenshot = view?.let { captureScreenshot(it) }
-                                result.complete(BrowserPage(url, finalUrl, title, text, screenshot))
+                                result.complete(BrowserPage(url, finalUrl, title, text, screenshot, links = links))
                             }
                         } ?: result.completeExceptionally(IllegalStateException("WebView não conseguiu ler a página."))
                     }
@@ -201,6 +246,20 @@ class PrivateBrowser(context: Context) {
             }
         }
     }
+
+    private fun normalizeSearchResultUrl(raw: String): String? = runCatching {
+        val candidate = URI(raw)
+        val redirected = candidate.rawQuery
+            ?.split("&")
+            ?.firstOrNull { it.startsWith("uddg=") }
+            ?.substringAfter("uddg=")
+            ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+        val resolved = redirected ?: raw
+        val uri = URI(resolved)
+        if (uri.scheme != "https" && uri.scheme != "http") return null
+        if (uri.host.isNullOrBlank()) return null
+        uri.toASCIIString()
+    }.getOrNull()
 
     private fun blockedResponse(message: String) =
         android.webkit.WebResourceResponse(
