@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -107,7 +108,7 @@ class InferenceRuntimeManager(
         messages: List<ChatTurn>,
         params: InferenceParameters
     ): Flow<InferenceStreamEvent> = flow {
-        _activeQueueDepth.value += 1
+        _activeQueueDepth.update { it + 1 }
         try {
             executionMutex.withLock {
                 val settings = settingsRepository.settingsFlow.first()
@@ -159,7 +160,7 @@ class InferenceRuntimeManager(
                 }
             }
         } finally {
-            _activeQueueDepth.value = (_activeQueueDepth.value - 1).coerceAtLeast(0)
+            _activeQueueDepth.update { (it - 1).coerceAtLeast(0) }
             memoryBudgetManager.refreshProfile()
         }
     }
