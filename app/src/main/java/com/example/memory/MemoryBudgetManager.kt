@@ -25,8 +25,6 @@ data class MemoryStatusState(
     val lastEvictionReason: String? = null
 )
 
-private const val SYSTEM_MEMORY_HEADROOM_MB = 768L
-
 class MemoryBudgetManager(
     private val deviceProfiler: DeviceProfiler
 ) {
@@ -70,10 +68,13 @@ class MemoryBudgetManager(
             currentlyLoadedMb + requestedFootprintMb
         }
 
+        val systemHeadroomMb = deviceProfiler.recommendedMemoryHeadroomMb()
         when {
             projectedMb > effectiveBudget -> false to "O modelo exige ~${requestedFootprintMb} MB, acima do orçamento exclusivo do modelo (${effectiveBudget} MB)."
-            profile.availableRamMb < requestedFootprintMb + SYSTEM_MEMORY_HEADROOM_MB ->
-                false to "Pressão de memória do Android: RAM física disponível ${profile.availableRamMb} MB; são necessários ${requestedFootprintMb + SYSTEM_MEMORY_HEADROOM_MB} MB livres para carregar com ${SYSTEM_MEMORY_HEADROOM_MB} MB de margem. Feche apps externos ou tente novamente."
+            deviceProfiler.isSystemLowMemory() ->
+                false to "O Android sinalizou pouca memória disponível. Feche aplicativos em segundo plano e tente novamente."
+            profile.availableRamMb < requestedFootprintMb + systemHeadroomMb ->
+                false to "Memória insuficiente para iniciar com segurança: ${profile.availableRamMb} MB disponíveis; estimativa do modelo ${requestedFootprintMb} MB e reserva dinâmica do Android ${systemHeadroomMb} MB. O LOCAL DEV AI tentará um contexto menor quando possível."
             else -> true to null
         }
     }
