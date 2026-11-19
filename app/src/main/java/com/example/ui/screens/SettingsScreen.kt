@@ -103,7 +103,7 @@ fun SettingsScreen(
         item {
             ObsidianCard {
                 Text(
-                    text = "Limites de RAM & Estabilidade",
+                    text = "RAM do modelo ativo & Estabilidade",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -116,11 +116,12 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 SettingsSliderRow(
-                    label = "Limite de RAM para modelos",
+                    label = "Teto de RAM para o modelo ativo",
                     valueText = "${settings.ramLimitMb} MB",
                     value = settings.ramLimitMb.toFloat(),
                     onValueChange = { onUpdateRamLimit(((it / 128f).roundToInt() * 128L)) },
-                    valueRange = 1024f..5632f
+                    valueRange = 1024f..6144f,
+                    helperText = "As IAs são carregadas uma por vez. Ao trocar de agente, o modelo anterior é descarregado; o limite não soma a RAM dos três modelos. A proteção dinâmica do Android continua ativa."
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
