@@ -8,6 +8,7 @@ import com.example.LocalDevAiApplication
 import com.example.agent_engine.MultiAgentLiveState
 import com.example.api_server.ApiServerStatus
 import com.example.api_server.LocalApiForegroundService
+import com.example.api_server.InferenceTaskForegroundService
 import com.example.api_server.NetworkAddressState
 import com.example.core.model.AgentRole
 import com.example.core.model.AgentRuntimeState
@@ -378,6 +379,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val job = viewModelScope.launch {
             val currentConsole = _agentConsoles.value[role] ?: AgentConsoleState()
             updateConsole(role) { it.copy(isGenerating = true, output = "", error = null) }
+            InferenceTaskForegroundService.startTask(getApplication())
 
             try {
                 val turns = listOf(
@@ -410,6 +412,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } finally {
                 updateConsole(role) { it.copy(isGenerating = false) }
+                InferenceTaskForegroundService.finishTask(getApplication())
             }
         }
         consoleJobs[role] = job
@@ -431,11 +434,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun runMultiAgentTask(prompt: String) {
         if (prompt.isBlank()) return
         viewModelScope.launch {
-            container.multiAgentOrchestrator.executeMultiAgentTask(
-                userRequest = prompt.trim(),
-                imagePath = _multiAgentImagePath.value,
-                source = "UI"
-            )
+            InferenceTaskForegroundService.startTask(getApplication())
+            try {
+                container.multiAgentOrchestrator.executeMultiAgentTask(
+                    userRequest = prompt.trim(),
+                    imagePath = _multiAgentImagePath.value,
+                    source = "UI"
+                )
+            } finally {
+                InferenceTaskForegroundService.finishTask(getApplication())
+            }
         }
     }
 
