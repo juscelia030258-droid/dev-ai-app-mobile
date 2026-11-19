@@ -32,7 +32,7 @@ class SettingsRepository(private val context: Context) {
 
     private object Keys {
         val SERVER_PORT = intPreferencesKey("server_port")
-        val RAM_LIMIT_MB = longPreferencesKey("ram_limit_mb")
+        val RAM_LIMIT_MB = longPreferencesKey("ram_limit_mb_active_model_v2")
         val LAN_ONLY_MODE = booleanPreferencesKey("lan_only_mode")
         val RATE_LIMIT_PER_MIN = intPreferencesKey("rate_limit_per_min")
         val MAX_REVISIONS = intPreferencesKey("max_revisions")
