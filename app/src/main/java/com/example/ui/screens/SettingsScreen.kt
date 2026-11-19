@@ -120,7 +120,7 @@ fun SettingsScreen(
                     valueText = "${settings.ramLimitMb} MB",
                     value = settings.ramLimitMb.toFloat(),
                     onValueChange = { onUpdateRamLimit(((it / 128f).roundToInt() * 128L)) },
-                    valueRange = 1024f..6144f,
+                    valueRange = 1024f..4096f,
                     helperText = "As IAs são carregadas uma por vez. Ao trocar de agente, o modelo anterior é descarregado; o limite não soma a RAM dos três modelos. A proteção dinâmica do Android continua ativa."
                 )
 
