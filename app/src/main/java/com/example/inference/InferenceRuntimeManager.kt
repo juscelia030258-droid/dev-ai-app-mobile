@@ -262,7 +262,20 @@ class InferenceRuntimeManager(
 
         // Automatic fallback from LiteRT-LM GPU to CPU if OpenCL fails on device
         if (loadResult.isFailure && targetRuntime == liteRtGpuRuntime) {
-            val fallbackRes = liteRtCpuRuntime.loadModel(model, params)
+            // CPU fallback can also fail on memory-constrained devices. Keep that
+            // failure inside the Result pipeline instead of letting an OOM crash the task.
+            val fallbackRes = try {
+                liteRtCpuRuntime.loadModel(model, params)
+            } catch (oom: OutOfMemoryError) {
+                runCatching { liteRtCpuRuntime.unloadModel() }
+                Result.failure(
+                    IllegalStateException(
+                        "Falta de memória (OOM) também no fallback CPU para ${model.name}. Reduza o contexto ou use uma quantização menor.",
+                        oom
+                    )
+                )
+            }
+
             if (fallbackRes.isSuccess) {
                 activeRuntime = liteRtCpuRuntime
                 activeModelEntity = model
@@ -279,7 +292,16 @@ class InferenceRuntimeManager(
                 updateAgentState(role, AgentRuntimeState.IDLE)
                 return Result.success(snap)
             }
+
             runCatching { liteRtCpuRuntime.unloadModel() }
+            val gpuError = loadResult.exceptionOrNull()?.message ?: "erro desconhecido"
+            val cpuError = fallbackRes.exceptionOrNull()?.message ?: "erro desconhecido"
+            updateAgentState(role, AgentRuntimeState.ERROR)
+            return Result.failure(
+                IllegalStateException(
+                    "LiteRT-LM GPU falhou ($gpuError). O fallback CPU também falhou ($cpuError)."
+                )
+            )
         }
 
         if (loadResult.isFailure) {
