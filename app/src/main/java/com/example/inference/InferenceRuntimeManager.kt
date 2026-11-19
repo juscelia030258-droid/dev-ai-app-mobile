@@ -218,7 +218,8 @@ class InferenceRuntimeManager(
         if (
             activeModelEntity?.id == model.id &&
             activeModelEntity?.mmprojPath == model.mmprojPath &&
-            activeContextLength == targetCtx &&
+            activeContextLength > 0 &&
+            activeContextLength <= requestedCtx &&
             activeRuntime == targetRuntime
         ) {
             val existing = memoryBudgetManager.state.value.loadedModels.firstOrNull()
