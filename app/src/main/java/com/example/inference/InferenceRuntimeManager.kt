@@ -219,7 +219,7 @@ class InferenceRuntimeManager(
             activeModelEntity?.id == model.id &&
             activeModelEntity?.mmprojPath == model.mmprojPath &&
             activeContextLength > 0 &&
-            activeContextLength <= requestedCtx &&
+            activeContextLength >= requestedCtx &&
             activeRuntime == targetRuntime
         ) {
             val existing = memoryBudgetManager.state.value.loadedModels.firstOrNull()
@@ -319,7 +319,8 @@ class InferenceRuntimeManager(
             // CPU fallback can also fail on memory-constrained devices. Keep that
             // failure inside the Result pipeline instead of letting an OOM crash the task.
             val fallbackRes = try {
-                liteRtCpuRuntime.loadModel(model, params)
+                // Preserve the context that passed the memory-budget checks.
+                liteRtCpuRuntime.loadModel(model, params.copy(contextLength = targetCtx))
             } catch (oom: OutOfMemoryError) {
                 runCatching { liteRtCpuRuntime.unloadModel() }
                 Result.failure(
