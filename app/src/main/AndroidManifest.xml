@@ -43,6 +43,15 @@
         </activity>
 
         <service
+            android:name=".api_server.InferenceTaskForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated on-device AI inference tasks that continue while the screen is off" />
+        </service>
+
+        <service
             android:name=".api_server.LocalApiForegroundService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
