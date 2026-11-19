@@ -26,18 +26,19 @@ class DeviceProfiler(private val context: Context) {
         // Reserve OS, SystemUI, Dalvik heap, and Ktor server headroom (~45% of total RAM or 2.8 GB min).
         val osReserveMb = max(2560L, (totalRamMb * 40L) / 100L)
         val hardwareSafeMaxMb = max(1024L, totalRamMb - osReserveMb)
-        val effectiveAvailCapMb = max(512L, availRamMb - 768L)
-        val computedSafeBudget = minOf(hardwareSafeMaxMb, effectiveAvailCapMb + 1024L)
-            .coerceAtMost(hardwareSafeMaxMb)
-        // Hard safety ceiling for this app: 3.5 GiB for the active model.
-        // This is independent of RAM Plus and still yields to lower live-memory estimates.
-        val safeBudgetCappedMb = computedSafeBudget.coerceAtMost(MAX_SAFE_INFERENCE_BUDGET_MB)
-        // The user's limit is a ceiling, not permission to ignore current free RAM.
-        // Always respect the configured cap, the app safety ceiling, and current available RAM.
-        val finalBudgetMb = if (userRamLimitMb != null && userRamLimitMb > 512L) {
-            minOf(userRamLimitMb, safeBudgetCappedMb)
+        // Model budget depends on physical device capacity and the user's model-only cap.
+        // Free RAM from Android/background apps is tracked separately as system pressure.
+        val hardwareModelBudgetMb = minOf(hardwareSafeMaxMb, MAX_SAFE_INFERENCE_BUDGET_MB)
+        val finalModelBudgetMb = if (userRamLimitMb != null && userRamLimitMb > 512L) {
+            minOf(userRamLimitMb, hardwareModelBudgetMb)
         } else {
-            safeBudgetCappedMb
+            hardwareModelBudgetMb
+        }
+        val systemMemoryPressureLabel = when {
+            availRamMb < 1024L -> "Crítica"
+            availRamMb < 2048L -> "Alta"
+            availRamMb < 3072L -> "Moderada"
+            else -> "Normal"
         }
 
         val nativeHeapMb = Debug.getNativeHeapAllocatedSize() / (1024L * 1024L)
@@ -79,7 +80,8 @@ class DeviceProfiler(private val context: Context) {
             sdkInt = Build.VERSION.SDK_INT,
             totalRamMb = totalRamMb,
             availableRamMb = availRamMb,
-            safeInferenceBudgetMb = finalBudgetMb,
+            modelSafeBudgetMb = finalModelBudgetMb,
+            systemMemoryPressureLabel = systemMemoryPressureLabel,
             processRssMb = processRssMb,
             freeStorageMb = freeStorageMb,
             totalStorageMb = totalStorageMb,
