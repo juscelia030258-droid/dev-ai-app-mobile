@@ -57,7 +57,8 @@ class ComposeNavigationRobolectricTest {
 
         composeRule.onNodeWithTag("nav_settings").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Limites de RAM & Estabilidade").assertIsDisplayed()
+        composeRule.onNodeWithText("RAM do modelo ativo & Estabilidade").assertIsDisplayed()
+        onNodeWithText("Teto de RAM para o modelo ativo").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("auto_unload_switch").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("settings_lazy_column").performScrollToNode(hasTestTag("thermal_guard_switch"))
         composeRule.waitForIdle()
