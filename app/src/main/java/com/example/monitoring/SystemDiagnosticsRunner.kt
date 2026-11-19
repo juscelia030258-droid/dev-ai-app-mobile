@@ -33,7 +33,7 @@ class SystemDiagnosticsRunner(
         // 1. Hardware & ARM64 check
         results += runCheck("Hardware & Arquitetura ARM64") {
             val profile = deviceProfiler.captureProfile()
-            "Modelo: ${profile.manufacturer} ${profile.modelName} | ABI: ${profile.abi} (ARM64=${profile.isArm64}) | RAM Total: ${profile.totalRamMb} MB | Orçamento seguro: ${profile.modelSafeBudgetMb} MB"
+            "Modelo: ${profile.manufacturer} ${profile.modelName} | ABI: ${profile.abi} (ARM64=${profile.isArm64}) | RAM Total: ${profile.totalRamMb} MB | Orçamento exclusivo do modelo: ${profile.modelSafeBudgetMb} MB | RAM livre do Android: ${profile.availableRamMb} MB | Pressão do sistema: ${profile.systemMemoryPressureLabel}"
         }
 
         // 2. Keystore / Persistent Primary Key check
