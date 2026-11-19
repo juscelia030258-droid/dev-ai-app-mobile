@@ -10,6 +10,8 @@ import android.os.StatFs
 import com.example.core.model.DeviceHardwareProfile
 import kotlin.math.max
 
+private const val MAX_SAFE_INFERENCE_BUDGET_MB = 3584L
+
 class DeviceProfiler(private val context: Context) {
 
     fun captureProfile(userRamLimitMb: Long? = null): DeviceHardwareProfile {
@@ -27,12 +29,15 @@ class DeviceProfiler(private val context: Context) {
         val effectiveAvailCapMb = max(512L, availRamMb - 768L)
         val computedSafeBudget = minOf(hardwareSafeMaxMb, effectiveAvailCapMb + 1024L)
             .coerceAtMost(hardwareSafeMaxMb)
+        // Hard safety ceiling for this app: 3.5 GiB for the active model.
+        // This is independent of RAM Plus and still yields to lower live-memory estimates.
+        val safeBudgetCappedMb = computedSafeBudget.coerceAtMost(MAX_SAFE_INFERENCE_BUDGET_MB)
         // The user's limit is a ceiling, not permission to ignore current free RAM.
-        // Always respect both the configured cap and the dynamically computed safe budget.
+        // Always respect the configured cap, the app safety ceiling, and current available RAM.
         val finalBudgetMb = if (userRamLimitMb != null && userRamLimitMb > 512L) {
-            minOf(userRamLimitMb, computedSafeBudget)
+            minOf(userRamLimitMb, safeBudgetCappedMb)
         } else {
-            computedSafeBudget
+            safeBudgetCappedMb
         }
 
         val nativeHeapMb = Debug.getNativeHeapAllocatedSize() / (1024L * 1024L)
