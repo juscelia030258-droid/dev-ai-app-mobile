@@ -21,7 +21,7 @@ data class MemoryStatusState(
     val profile: DeviceHardwareProfile,
     val loadedModels: List<LoadedModelSnapshot> = emptyList(),
     val estimatedModelsRamMb: Long = 0L,
-    val userConfiguredRamLimitMb: Long = 6144L,
+    val userConfiguredRamLimitMb: Long = 4096L,
     val lastEvictionReason: String? = null
 )
 
@@ -29,7 +29,7 @@ class MemoryBudgetManager(
     private val deviceProfiler: DeviceProfiler
 ) {
     private val mutex = Mutex()
-    private var ramLimitMb: Long = 6144L
+    private var ramLimitMb: Long = 4096L
 
     private val _state = MutableStateFlow(
         MemoryStatusState(
@@ -48,7 +48,7 @@ class MemoryBudgetManager(
     }
 
     fun updateUserRamLimitMb(limitMb: Long) {
-        ramLimitMb = limitMb.coerceIn(1024L, 6144L)
+        ramLimitMb = limitMb.coerceIn(1024L, 4096L)
         refreshProfile()
     }
 
