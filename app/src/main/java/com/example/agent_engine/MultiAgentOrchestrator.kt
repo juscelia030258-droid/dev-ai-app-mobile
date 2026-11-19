@@ -128,6 +128,7 @@ class MultiAgentOrchestrator(
 
                     // Execute the Reasoning AI's bounded, read-only web research requests.
                     val browserEvidence = StringBuilder()
+                    var browserScreenshotPath: String? = null
                     plan.browserRequests.take(3).forEachIndexed { index, request ->
                         val query = request.query.trim().take(200)
                         if (query.isNotBlank()) {
@@ -143,6 +144,7 @@ class MultiAgentOrchestrator(
                                     browserEvidence.appendLine("Página: ${page.title} — ${page.finalUrl}")
                                     browserEvidence.appendLine(page.text.take(6500))
                                     browserEvidence.appendLine()
+                                    if (browserScreenshotPath == null) browserScreenshotPath = page.screenshotPath
                                     steps += MultiAgentStep(
                                         stepIndex = steps.size + 1,
                                         phase = "Pesquisa no Private Browser",
@@ -189,7 +191,8 @@ class MultiAgentOrchestrator(
                     val reviewNotes = mutableListOf<String>()
 
                     // Phase 2: Vision AI (if image + needed) — sequential model swap + critic verification
-                    if (plan.useVision && imagePath != null) {
+                    val visionImagePath = imagePath ?: browserScreenshotPath
+                    if (plan.useVision && visionImagePath != null) {
                         var currentVisionInstruction = plan.visionInstruction.ifBlank { userRequest }
                         var visionAttempts = 0
                         var visionApproved = false
@@ -203,7 +206,7 @@ class MultiAgentOrchestrator(
                                 toAgent = AgentRole.VISION.id,
                                 objective = currentVisionInstruction,
                                 contextSummary = plan.goalSummary,
-                                imagePath = imagePath,
+                                imagePath = visionImagePath,
                                 constraints = plan.acceptanceCriteria,
                                 status = if (visionAttempts == 1) "DISPATCHED" else "REVISION_$visionAttempts"
                             )
@@ -217,7 +220,7 @@ class MultiAgentOrchestrator(
                                     ChatTurn(
                                         role = "user",
                                         text = "Tarefa estruturada (${envelope.taskId}): ${envelope.objective}\nCritérios: ${envelope.constraints.joinToString("; ")}",
-                                        imagePath = imagePath
+                                        imagePath = visionImagePath
                                     )
                                 ),
                                 source = source
