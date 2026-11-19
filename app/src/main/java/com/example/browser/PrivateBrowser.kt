@@ -25,7 +25,6 @@ import java.util.Locale
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.jsonPrimitive
 
 data class BrowserPage(
     val requestedUrl: String,
@@ -100,8 +99,8 @@ class PrivateBrowser(context: Context) {
                 settings.allowContentAccess = false
                 settings.javaScriptCanOpenWindowsAutomatically = false
                 settings.setSupportMultipleWindows(false)
-                settings.loadsImagesAutomatically = false
-                settings.blockNetworkImage = true
+                settings.loadsImagesAutomatically = true
+                settings.blockNetworkImage = false
                 settings.setGeolocationEnabled(false)
                 settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE
                 CookieManager.getInstance().setAcceptCookie(false)
@@ -111,12 +110,14 @@ class PrivateBrowser(context: Context) {
 
         try {
             withContext(Dispatchers.Main) {
+                val allowedHost = URI(url).host?.lowercase(Locale.ROOT)
                 webView.webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         val targetUri = request?.url ?: return true
                         val scheme = targetUri.scheme?.lowercase(Locale.ROOT)
-                        // Prevent redirects and page links from escaping to app/file/custom schemes.
-                        return scheme != "https" && scheme != "http"
+                        val targetHost = targetUri.host?.lowercase(Locale.ROOT)
+                        // Keep top-level navigation on the validated public host.
+                        return (scheme != "https" && scheme != "http") || targetHost != allowedHost
                     }
 
                     override fun onPageFinished(view: WebView?, finishedUrl: String?) {
