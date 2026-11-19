@@ -15,7 +15,7 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 
 data class AppSettings(
     val serverPort: Int = 8080,
-    val ramLimitMb: Long = 6144L,
+    val ramLimitMb: Long = 4096L,
     val lanOnlyMode: Boolean = true,
     val rateLimitPerMinute: Int = 60,
     val maxMultiAgentRevisions: Int = 2,
@@ -48,7 +48,7 @@ class SettingsRepository(private val context: Context) {
     val settingsFlow: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
         AppSettings(
             serverPort = prefs[Keys.SERVER_PORT] ?: 8080,
-            ramLimitMb = prefs[Keys.RAM_LIMIT_MB] ?: 6144L,
+            ramLimitMb = prefs[Keys.RAM_LIMIT_MB] ?: 4096L,
             lanOnlyMode = prefs[Keys.LAN_ONLY_MODE] ?: true,
             rateLimitPerMinute = prefs[Keys.RATE_LIMIT_PER_MIN] ?: 60,
             maxMultiAgentRevisions = prefs[Keys.MAX_REVISIONS] ?: 2,
@@ -67,7 +67,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun updateRamLimitMb(limitMb: Long) {
-        context.settingsDataStore.edit { it[Keys.RAM_LIMIT_MB] = limitMb.coerceIn(1024L, 6144L) }
+        context.settingsDataStore.edit { it[Keys.RAM_LIMIT_MB] = limitMb.coerceIn(1024L, 4096L) }
     }
 
     suspend fun updateLanOnlyMode(enabled: Boolean) {
