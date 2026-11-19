@@ -39,6 +39,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -352,6 +358,11 @@ fun MultiAgentScreen(
 
         items(recentRuns, key = { it.taskId }) { run ->
             val ok = run.status == "COMPLETED"
+            var showJournal by remember(run.taskId) { mutableStateOf(false) }
+            val journalSteps = remember(run.stepsJson) {
+                runCatching { Json.parseToJsonElement(run.stepsJson).jsonArray }
+                    .getOrDefault(JsonArray(emptyList()))
+            }
             ObsidianCard {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -388,6 +399,44 @@ fun MultiAgentScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium
                 )
+                OutlinedButton(
+                    onClick = { showJournal = !showJournal },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (showJournal) "Ocultar diário da tarefa" else "Ver diário da tarefa (${journalSteps.size} etapas)")
+                }
+                if (showJournal) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "PLANO SALVO",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = ReasoningIndigo
+                    )
+                    Text(
+                        text = run.planJson.take(1800),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = MonoFontFamily
+                    )
+                    journalSteps.forEachIndexed { index, step ->
+                        val data = step.jsonObject
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "#${data["stepIndex"]?.jsonPrimitive?.contentOrNull ?: (index + 1)} ${data["phase"]?.jsonPrimitive?.contentOrNull ?: "Etapa"} • ${data["agentRole"]?.jsonPrimitive?.contentOrNull ?: "Agente"}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = data["instruction"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = data["outputSummary"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
                 if (!run.errorMessage.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
