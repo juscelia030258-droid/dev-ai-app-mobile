@@ -10,6 +10,8 @@ import com.example.api_server.ApiServerStatus
 import com.example.api_server.LocalApiForegroundService
 import com.example.api_server.InferenceTaskForegroundService
 import com.example.api_server.NetworkAddressState
+import com.example.extensions.ExtensionCatalog
+import com.example.extensions.LocalExtension
 import com.example.core.model.AgentRole
 import com.example.core.model.AgentRuntimeState
 import com.example.core.model.DiagnosticCheckResult
@@ -96,6 +98,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recommendedPresets: List<RecommendedModelPreset> = container.modelRepository.recommendedPresets
+    val extensions: List<LocalExtension> = ExtensionCatalog.all
+
+    fun toggleExtension(id: String, enabled: Boolean) {
+        viewModelScope.launch { container.settingsRepository.updateExtensionEnabled(id, enabled) }
+    }
 
     private val _primaryKeyPlaintext = MutableStateFlow<String?>(null)
     val primaryKeyPlaintext: StateFlow<String?> = _primaryKeyPlaintext.asStateFlow()
