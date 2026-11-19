@@ -57,16 +57,16 @@ class ModelRepository(
 
     val recommendedPresets: List<RecommendedModelPreset> = listOf(
         RecommendedModelPreset(
-            id = "qwen2_5_coder_1_5b_q4",
-            name = "Qwen2.5-Coder 1.5B Instruct (Q4_K_M)",
+            id = "qwen2_5_coder_3b_q4_k_m",
+            name = "Qwen2.5-Coder 3B Instruct (Q4_K_M)",
             recommendedRole = AgentRole.CODING,
             format = ModelFormat.GGUF,
-            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-            estimatedSizeMb = 986L,
-            estimatedRamMb = 1550L,
+            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+            estimatedSizeMb = 2100L,
+            estimatedRamMb = 2900L,
             supportsVision = false,
             quantization = "Q4_K_M",
-            notes = "Modelo compacto e rápido de programação para ARM64 (8 GB RAM). Ideal para Qoder."
+            notes = "Modelo especializado em programação; contexto adaptativo e execução sequencial recomendados em celulares."
         ),
         RecommendedModelPreset(
             id = "smolvlm_500m_vision",
@@ -82,16 +82,16 @@ class ModelRepository(
             notes = "Visão multimodal real com projetor mmproj para análise de capturas de tela e UI."
         ),
         RecommendedModelPreset(
-            id = "deepseek_r1_qwen_1_5b_q4",
-            name = "DeepSeek-R1 Distill Qwen 1.5B (Q4_K_M)",
+            id = "phi4_mini_instruct_q4_k_m",
+            name = "Phi-4-mini-instruct (Q4_K_M)",
             recommendedRole = AgentRole.REASONING,
             format = ModelFormat.GGUF,
-            downloadUrl = "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-            estimatedSizeMb = 1120L,
-            estimatedRamMb = 1720L,
+            downloadUrl = "https://huggingface.co/tensorblock/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf",
+            estimatedSizeMb = 2492L,
+            estimatedRamMb = 3300L,
             supportsVision = false,
             quantization = "Q4_K_M",
-            notes = "Especializado em raciocínio estruturado, planejamento de tarefas e verificação crítica."
+            notes = "Modelo geral para raciocínio e planejamento; contexto adaptativo e execução sequencial recomendados em celulares."
         ),
         RecommendedModelPreset(
             id = "qwen3_0_6b_litert",
