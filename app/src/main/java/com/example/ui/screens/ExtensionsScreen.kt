@@ -15,17 +15,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.extensions.ExtensionCatalog
 
 @Composable
 fun ExtensionsScreen(enabled: Set<String>, onToggle: (String, Boolean) -> Unit) {
-    val entries = listOf(
-        Triple("developer_toolkit", "Developer Toolkit", "Análise de projetos, dependências e depuração."),
-        Triple("long_memory", "Long Memory", "Recuperação de decisões e contexto persistente."),
-        Triple("web_research", "Web Research", "Pesquisa pública pelo Private Browser, somente leitura."),
-        Triple("math_engine", "Math Engine", "Apoio a cálculos e conversões."),
-        Triple("system_tools", "System Tools", "Diagnóstico de RAM, modelos e dispositivo."),
-        Triple("code_tester", "Code Tester", "Checklist e análise de testes; não executa código arbitrário.")
-    )
+    val entries = ExtensionCatalog.all
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -33,14 +27,16 @@ fun ExtensionsScreen(enabled: Set<String>, onToggle: (String, Boolean) -> Unit) 
                 Text("Ative as ferramentas necessárias. As extensões não carregam modelos adicionais.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        items(entries, key = { it.first }) { entry ->
+        items(entries, key = { it.id }) { entry ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(entry.second, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        Switch(checked = entry.first in enabled, onCheckedChange = { onToggle(entry.first, it) })
+                        Text(entry.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Switch(checked = entry.id in enabled, onCheckedChange = { onToggle(entry.id, it) })
                     }
-                    Text(entry.third, style = MaterialTheme.typography.bodyMedium)
+                    Text(entry.description, style = MaterialTheme.typography.bodyMedium)
+                    Text(entry.status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Recursos: " + entry.capabilities.joinToString(" • "), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
