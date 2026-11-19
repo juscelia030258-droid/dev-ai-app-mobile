@@ -88,7 +88,8 @@ class AppContainer(context: Context) {
         localModelDao = database.localModelDao(),
         multiAgentRunDao = database.multiAgentRunDao(),
         settingsRepository = settingsRepository,
-        privateBrowser = privateBrowser
+        privateBrowser = privateBrowser,
+        deviceProfiler = deviceProfiler
     )
 
     val openAiApiServer = OpenAiApiServer(
