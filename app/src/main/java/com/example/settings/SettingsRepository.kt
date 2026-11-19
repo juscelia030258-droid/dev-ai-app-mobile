@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -25,7 +26,8 @@ data class AppSettings(
     val thermalGuardEnabled: Boolean = true,
     val defaultMaxTokens: Int = 1024,
     val darkThemeEnabled: Boolean = true,
-    val autoStartServerOnLaunch: Boolean = false
+    val autoStartServerOnLaunch: Boolean = false,
+    val enabledExtensions: Set<String> = ExtensionIds.ALL
 )
 
 class SettingsRepository(private val context: Context) {
@@ -58,7 +60,8 @@ class SettingsRepository(private val context: Context) {
             thermalGuardEnabled = prefs[Keys.THERMAL_GUARD_ENABLED] ?: true,
             defaultMaxTokens = (prefs[Keys.DEFAULT_MAX_TOKENS] ?: 1024).coerceIn(256, 4096),
             darkThemeEnabled = prefs[Keys.DARK_THEME] ?: true,
-            autoStartServerOnLaunch = prefs[Keys.AUTO_START_SERVER] ?: false
+            autoStartServerOnLaunch = prefs[Keys.AUTO_START_SERVER] ?: false,
+            enabledExtensions = ExtensionIds.ALL.filterTo(mutableSetOf()) { id -> prefs[stringPreferencesKey("extension_" + id)] != "disabled" }
         )
     }
 
@@ -108,6 +111,11 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun updateAutoStartServer(enabled: Boolean) {
         context.settingsDataStore.edit { it[Keys.AUTO_START_SERVER] = enabled }
+    }
+
+    suspend fun updateExtensionEnabled(id: String, enabled: Boolean) {
+        require(id in ExtensionIds.ALL) { "Extensão desconhecida." }
+        context.settingsDataStore.edit { it[stringPreferencesKey("extension_" + id)] = if (enabled) "enabled" else "disabled" }
     }
 
     suspend fun resetToDefaults() {
