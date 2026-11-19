@@ -340,6 +340,24 @@ class LocalDevAiIntegrationTest {
         assertEquals(1, browserPlan.browserRequests.size)
         assertEquals("documentação oficial Kotlin coroutines", browserPlan.browserRequests.first().query)
         assertTrue("Vision may analyze a browser screenshot when the plan requests it", browserPlan.useVision)
+
+        val malformedWebPlan = container.reasoningAgent.parsePlanSafely(
+            rawText = "Plano: vou pesquisar na internet, mas não consegui produzir JSON.",
+            userRequest = "Pesquise na internet as mudanças recentes do Android",
+            hasImage = false,
+            codingEnabled = true,
+            visionEnabled = true
+        )
+        assertEquals("Explicit web requests must still invoke the browser if planner JSON is malformed", 1, malformedWebPlan.browserRequests.size)
+
+        val stableKnowledgePlan = container.reasoningAgent.parsePlanSafely(
+            rawText = "Resposta em texto livre sem JSON.",
+            userRequest = "Explique o que é uma variável em programação",
+            hasImage = false,
+            codingEnabled = true,
+            visionEnabled = true
+        )
+        assertTrue("Stable general knowledge should not trigger web browsing by default", stableKnowledgePlan.browserRequests.isEmpty())
     }
 
     @Test
