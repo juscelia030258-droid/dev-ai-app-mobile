@@ -22,12 +22,14 @@ import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.outlined.Api
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -70,6 +72,7 @@ import com.example.ui.screens.DashboardScreen
 import com.example.ui.screens.ModelsScreen
 import com.example.ui.screens.MultiAgentScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.ExtensionsScreen
 import com.example.ui.theme.LocalDevAiTheme
 import com.example.ui.theme.MultiAgentAmber
 import com.example.ui.theme.StatusOnline
@@ -81,6 +84,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object MultiAgentRoute
 @Serializable data object ApiQoderRoute
 @Serializable data object SettingsRoute
+@Serializable data object ExtensionsRoute
 
 private data class NavItem(
     val route: Any,
@@ -96,6 +100,7 @@ private val NAV_ITEMS = listOf(
     NavItem(ModelsRoute, "Modelos", Icons.Filled.Memory, Icons.Outlined.Memory, "nav_models"),
     NavItem(MultiAgentRoute, "Multi", Icons.Filled.Hub, Icons.Outlined.Hub, "nav_multiagent"),
     NavItem(ApiQoderRoute, "API", Icons.Filled.Api, Icons.Outlined.Api, "nav_api"),
+    NavItem(ExtensionsRoute, "Ext", Icons.Filled.Extension, Icons.Outlined.Extension, "nav_extensions"),
     NavItem(SettingsRoute, "Config", Icons.Filled.Settings, Icons.Outlined.Settings, "nav_settings")
 )
 
@@ -371,6 +376,9 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             onClearLogs = viewModel::clearLogs,
                             onBannerMessage = viewModel::showBanner
                         )
+                    }
+                    composable<ExtensionsRoute> {
+                        ExtensionsScreen(enabled = settings.enabledExtensions, onToggle = viewModel::toggleExtension)
                     }
                     composable<SettingsRoute> {
                         SettingsScreen(
