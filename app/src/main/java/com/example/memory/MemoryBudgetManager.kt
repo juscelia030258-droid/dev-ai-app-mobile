@@ -21,7 +21,7 @@ data class MemoryStatusState(
     val profile: DeviceHardwareProfile,
     val loadedModels: List<LoadedModelSnapshot> = emptyList(),
     val estimatedModelsRamMb: Long = 0L,
-    val userConfiguredRamLimitMb: Long = 3800L,
+    val userConfiguredRamLimitMb: Long = 6144L,
     val lastEvictionReason: String? = null
 )
 
@@ -29,7 +29,7 @@ class MemoryBudgetManager(
     private val deviceProfiler: DeviceProfiler
 ) {
     private val mutex = Mutex()
-    private var ramLimitMb: Long = 3800L
+    private var ramLimitMb: Long = 6144L
 
     private val _state = MutableStateFlow(
         MemoryStatusState(
@@ -59,6 +59,9 @@ class MemoryBudgetManager(
     ): Pair<Boolean, String?> = mutex.withLock {
         val profile = deviceProfiler.captureProfile(ramLimitMb)
         val effectiveBudget = minOf(ramLimitMb, profile.safeInferenceBudgetMb)
+        // Sequential inference: when switching agents, the previous runtime is unloaded
+        // before this check. Only the incoming active model consumes the model budget.
+        // Keep the additive path only for any future runtime that explicitly keeps models resident.
         val projectedMb = if (willUnloadOthers) {
             requestedFootprintMb
         } else {
@@ -66,7 +69,7 @@ class MemoryBudgetManager(
         }
 
         return@withLock if (projectedMb > effectiveBudget) {
-            false to "Memória insuficiente: modelo exige ~${requestedFootprintMb} MB, orçamento seguro atual é ${effectiveBudget} MB (RAM livre: ${profile.availableRamMb} MB)."
+            false to "Memória insuficiente para carregar este modelo ativo: exige ~${requestedFootprintMb} MB, orçamento seguro disponível é ${effectiveBudget} MB (RAM livre: ${profile.availableRamMb} MB). Os outros modelos não são somados porque são descarregados na troca."
         } else {
             true to null
         }
