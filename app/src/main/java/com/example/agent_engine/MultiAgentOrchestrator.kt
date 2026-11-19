@@ -85,7 +85,7 @@ class MultiAgentOrchestrator(
         val taskId = "task_${UUID.randomUUID().toString().take(8)}"
         val startedAt = System.currentTimeMillis()
         val settings = settingsRepository.settingsFlow.first()
-        val persistentContext = buildPersistentContext()
+        val persistentContext = if ("long_memory" in settings.enabledExtensions) buildPersistentContext() else ""
         var enrichedRequest = if (persistentContext.isBlank()) userRequest else """
             CONTEXTO PERSISTENTE DO PROJETO (tarefas anteriores concluídas):
             $persistentContext
@@ -139,7 +139,7 @@ class MultiAgentOrchestrator(
                     // Execute the Reasoning AI's bounded, read-only web research requests.
                     val browserEvidence = StringBuilder()
                     var browserScreenshotPath: String? = null
-                    plan.browserRequests.take(3).forEachIndexed { index, request ->
+                    if ("web_research" in settings.enabledExtensions) plan.browserRequests.take(3).forEachIndexed { index, request ->
                         val query = request.query.trim().take(200)
                         if (query.isNotBlank()) {
                             _liveState.value = _liveState.value.copy(
