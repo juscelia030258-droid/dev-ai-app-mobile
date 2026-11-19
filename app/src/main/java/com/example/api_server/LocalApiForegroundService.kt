@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
@@ -28,6 +29,7 @@ class LocalApiForegroundService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var monitorJob: Job? = null
+    private var memoryMaintenanceJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -75,6 +77,7 @@ class LocalApiForegroundService : Service() {
                 return@launch
             }
             startNotificationUpdater(container)
+            startMemoryMaintenance(container)
         }
 
         return START_STICKY
@@ -95,6 +98,22 @@ class LocalApiForegroundService : Service() {
                 val text = "$baseUrl • ${serverStatus.totalRequestsHandled} reqs • ${serverStatus.activeConnections} ativas"
                 val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 nm.notify(NOTIFICATION_ID, buildNotification(title, text))
+            }
+        }
+    }
+
+    // This maintenance loop belongs to the foreground service, not the UI,
+    // so idle-model cleanup also runs while the screen is off.
+    private fun startMemoryMaintenance(container: com.example.core.di.AppContainer) {
+        memoryMaintenanceJob?.cancel()
+        memoryMaintenanceJob = serviceScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(MEMORY_MAINTENANCE_INTERVAL_MS)
+                val settings = container.settingsRepository.settingsFlow.first()
+                if (settings.autoUnloadIdleModels) {
+                    val timeoutMs = settings.idleUnloadMinutes.coerceIn(1, 30) * 60_000L
+                    container.inferenceRuntimeManager.unloadIfIdleFor(timeoutMs)
+                }
             }
         }
     }
@@ -166,6 +185,7 @@ class LocalApiForegroundService : Service() {
 
     override fun onDestroy() {
         monitorJob?.cancel()
+        memoryMaintenanceJob?.cancel()
         releaseWakeLock()
         serviceScope.cancel()
         super.onDestroy()
@@ -177,6 +197,7 @@ class LocalApiForegroundService : Service() {
         const val ACTION_START_SERVER = "com.example.action.START_API_SERVER"
         const val ACTION_STOP_SERVER = "com.example.action.STOP_API_SERVER"
         const val EXTRA_PORT = "extra_port"
+        private const val MEMORY_MAINTENANCE_INTERVAL_MS = 15_000L
 
         fun startServerService(context: Context, port: Int? = null) {
             val intent = Intent(context, LocalApiForegroundService::class.java).apply {
