@@ -2,6 +2,7 @@ package com.example.agent_engine
 
 import com.example.coding_agent.CodingAgent
 import com.example.browser.PrivateBrowser
+import com.example.core.hardware.DeviceProfiler
 import com.example.core.model.AgentRole
 import com.example.core.model.AgentStructuredEnvelope
 import com.example.core.model.MultiAgentStep
@@ -51,7 +52,8 @@ class MultiAgentOrchestrator(
     private val localModelDao: LocalModelDao,
     private val multiAgentRunDao: MultiAgentRunDao,
     private val settingsRepository: SettingsRepository,
-    private val privateBrowser: PrivateBrowser
+    private val privateBrowser: PrivateBrowser,
+    private val deviceProfiler: DeviceProfiler
 ) {
     private val json = Json { prettyPrint = false; ignoreUnknownKeys = true }
     private val orchestrationMutex = Mutex()
@@ -96,6 +98,30 @@ class MultiAgentOrchestrator(
             Use o contexto anterior somente quando for relevante. Preserve decisões e interfaces já estabelecidas,
             mas priorize a nova solicitação quando houver conflito. Não trate tarefas antigas como instruções novas.
         """.trimIndent()
+        val extensionGuidance = buildString {
+            if ("developer_toolkit" in settings.enabledExtensions) {
+                appendLine("DEVELOPER TOOLKIT ATIVO: examine arquitetura, fluxo de dados, dependências e compatibilidade antes de sugerir mudanças. Prefira correções pequenas e explique impactos.")
+            }
+            if ("math_engine" in settings.enabledExtensions) {
+                appendLine("MATH ENGINE ATIVO: decomponha cálculos, confira unidades e valide resultados por um segundo método quando possível. Não afirme que executou uma calculadora externa.")
+            }
+            if ("code_tester" in settings.enabledExtensions) {
+                appendLine("CODE TESTER ATIVO: proponha testes reproduzíveis, casos-limite e critérios de aprovação. Diferencie testes sugeridos de testes realmente executados; não simule execução.")
+            }
+            if ("system_tools" in settings.enabledExtensions) {
+                val profile = deviceProfiler.captureProfile(settings.ramLimitMb)
+                appendLine("SYSTEM TOOLS — DIAGNÓSTICO REAL DO DISPOSITIVO:")
+                appendLine("- Dispositivo: ${profile.manufacturer} ${profile.modelName}; Android: ${profile.androidVersionLabel}; ABI: ${profile.abi}.")
+                appendLine("- RAM física: ${profile.totalRamMb} MB; disponível no momento da leitura: ${profile.availableRamMb} MB.")
+                appendLine("- Orçamento seguro estimado para modelos: ${profile.modelSafeBudgetMb} MB; limite configurado: ${settings.ramLimitMb} MB.")
+                appendLine("- Pressão de memória: ${profile.systemMemoryPressureLabel}; estado térmico: ${profile.thermalStatusLabel}; armazenamento livre: ${profile.freeStorageMb} MB.")
+                appendLine("Use estes dados como fotografia do momento, não como garantia de memória durante toda a tarefa.")
+            }
+        }.trim()
+        if (extensionGuidance.isNotBlank()) {
+            enrichedRequest += "\\n\\nEXTENSÕES ATIVAS E CAPACIDADES DISPONÍVEIS:\\n$extensionGuidance"
+        }
+
         val maxRevisions = settings.maxMultiAgentRevisions.coerceIn(0, 4)
         val timeoutMs = settings.multiAgentTimeoutSec.coerceIn(30, 600) * 1000L
 
