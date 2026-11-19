@@ -177,6 +177,12 @@ interface MultiAgentRunDao {
     @Query("SELECT * FROM multi_agent_runs WHERE status = 'COMPLETED' ORDER BY createdAt DESC LIMIT 5")
     suspend fun getRecentCompleted(): List<MultiAgentRunEntity>
 
+    @Query("SELECT * FROM multi_agent_runs WHERE status = 'RUNNING'")
+    suspend fun getInterruptedCandidates(): List<MultiAgentRunEntity>
+
+    @Query("UPDATE multi_agent_runs SET status = 'INTERRUPTED', errorMessage = :reason WHERE taskId = :taskId AND status = 'RUNNING'")
+    suspend fun markInterrupted(taskId: String, reason: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(run: MultiAgentRunEntity)
 }
