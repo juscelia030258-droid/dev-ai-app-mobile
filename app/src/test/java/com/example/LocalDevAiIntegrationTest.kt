@@ -329,6 +329,17 @@ class LocalDevAiIntegrationTest {
         assertEquals("UI Login", plan.goalSummary)
         assertTrue(plan.useVision)
         assertTrue(plan.useCoding)
+
+        val browserPlan = container.reasoningAgent.parsePlanSafely(
+            rawText = """{"goalSummary":"Pesquisar documentação","useVision":true,"useCoding":false,"browserRequests":[{"query":"documentação oficial Kotlin coroutines","objective":"Encontrar referência atual"}]}""",
+            userRequest = "Pesquise a documentação atual de Kotlin coroutines",
+            hasImage = false,
+            codingEnabled = true,
+            visionEnabled = true
+        )
+        assertEquals(1, browserPlan.browserRequests.size)
+        assertEquals("documentação oficial Kotlin coroutines", browserPlan.browserRequests.first().query)
+        assertTrue("Vision may analyze a browser screenshot when the plan requests it", browserPlan.useVision)
     }
 
     @Test
