@@ -119,7 +119,7 @@ class MultiAgentOrchestrator(
             }
         }.trim()
         if (extensionGuidance.isNotBlank()) {
-            enrichedRequest += "\\n\\nEXTENSÕES ATIVAS E CAPACIDADES DISPONÍVEIS:\\n$extensionGuidance"
+            enrichedRequest += "\n\nEXTENSÕES ATIVAS E CAPACIDADES DISPONÍVEIS:\n$extensionGuidance"
         }
 
         val maxRevisions = settings.maxMultiAgentRevisions.coerceIn(0, 4)
