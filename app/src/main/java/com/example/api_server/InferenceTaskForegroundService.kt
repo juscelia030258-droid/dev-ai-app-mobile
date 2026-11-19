@@ -101,7 +101,8 @@ class InferenceTaskForegroundService : Service() {
 
         fun finishTask(context: Context) {
             val intent = Intent(context, InferenceTaskForegroundService::class.java).setAction(ACTION_FINISH_TASK)
-            context.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
         }
     }
 }
