@@ -320,13 +320,22 @@ class ReasoningAgent(
         val lower = userRequest.lowercase()
         val looksLikeCode = listOf("code", "código", "kotlin", "python", "função", "bug", "erro", "ui", "compose", "api", "html", "sql", "class", "refactor")
             .any { lower.contains(it) }
+        val fallbackBrowserRequests = if (
+            explicitlyRequestsWeb(userRequest) || needsCurrentInformation(userRequest)
+        ) listOf(
+            BrowserRequest(
+                query = userRequest.take(180),
+                objective = "Pesquisar fontes públicas e confirmar as informações necessárias para a solicitação."
+            )
+        ) else emptyList()
         return OrchestrationPlan(
             goalSummary = userRequest.take(160),
             useVision = hasImage && visionEnabled,
             useCoding = codingEnabled && (looksLikeCode || !hasImage),
             visionInstruction = if (hasImage) "Analise a imagem considerando: $userRequest" else "",
             codingInstruction = if (looksLikeCode || !hasImage) userRequest else "",
-            acceptanceCriteria = listOf("Coerência com a solicitação original", "Ausência de contradições")
+            acceptanceCriteria = listOf("Coerência com a solicitação original", "Ausência de contradições"),
+            browserRequests = fallbackBrowserRequests
         )
     }
 
