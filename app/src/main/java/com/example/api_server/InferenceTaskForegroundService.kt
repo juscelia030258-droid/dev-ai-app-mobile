@@ -89,7 +89,7 @@ class InferenceTaskForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "local_dev_ai_inference_tasks"
         private const val NOTIFICATION_ID = 4042
-        private const val MAX_WAKE_LOCK_MS = 2 * 60 * 60 * 1000L
+        private const val MAX_WAKE_LOCK_MS = 6 * 60 * 60 * 1000L
         private const val ACTION_START_TASK = "com.example.action.START_INFERENCE_TASK"
         private const val ACTION_FINISH_TASK = "com.example.action.FINISH_INFERENCE_TASK"
 
