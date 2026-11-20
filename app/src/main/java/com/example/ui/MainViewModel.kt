@@ -598,8 +598,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "ESPECIFICAÇÃO: transforme a imagem em uma lista curta de componentes e relações que a Coding AI possa implementar."
                 )
             )
-            val selectedDurations = _calibrationDurations.value
-            val selectedModes = _calibrationModes.value
+            val restoredModes = savedCheckpoint?.selectedModes?.mapNotNull { (roleId, modeName) ->
+                val role = roles.firstOrNull { it.id == roleId }
+                val mode = runCatching { CalibrationMode.valueOf(modeName) }.getOrNull()
+                if (role != null && mode != null) role to mode else null
+            }?.toMap().orEmpty()
+            val restoredDurations = savedCheckpoint?.selectedDurations?.mapNotNull { (roleId, minutes) ->
+                roles.firstOrNull { it.id == roleId }?.let { it to minutes.coerceIn(1, 120) }
+            }?.toMap().orEmpty()
+            val selectedDurations = _calibrationDurations.value.toMutableMap().apply { putAll(restoredDurations) }
+            val selectedModes = _calibrationModes.value.toMutableMap().apply { putAll(restoredModes) }
+            if (savedCheckpoint != null) {
+                _calibrationDurations.value = selectedDurations
+                _calibrationModes.value = selectedModes
+            }
             val sacePrefs = getApplication<Application>().getSharedPreferences("sace_progress", 0)
             val sessionNumber = savedCheckpoint?.sessionNumber?.takeIf { it > 0 } ?: saceProgressStore.beginSession()
             val isSurpriseSession = sessionNumber % 5 == 0
@@ -693,7 +705,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         saceProgressStore.saveCheckpoint(
                             roleId = role.id, mode = mode.name, nextAttempt = attempt,
-                            startedAt = roleStartedAt, sessionNumber = sessionNumber
+                            startedAt = roleStartedAt, sessionNumber = sessionNumber,
+                            selectedModes = selectedModes.mapKeys { it.key.id }.mapValues { it.value.name },
+                            selectedDurations = selectedDurations.mapKeys { it.key.id }
                         )
                         awaitSafeSaceConditions()
                         if (pauseRequested) throw kotlinx.coroutines.CancellationException("Pausa solicitada pelo usuário")
@@ -745,7 +759,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             mode = mode.name,
                             nextAttempt = attempt + 1,
                             startedAt = roleStartedAt,
-                            sessionNumber = sessionNumber
+                            sessionNumber = sessionNumber,
+                            selectedModes = selectedModes.mapKeys { it.key.id }.mapValues { it.value.name },
+                            selectedDurations = selectedDurations.mapKeys { it.key.id }
                         )
                         if (failure != null || output.isBlank()) {
                             report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
