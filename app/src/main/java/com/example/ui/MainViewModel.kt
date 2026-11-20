@@ -880,6 +880,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         benchmarkJob?.cancel()
         benchmarkJob = viewModelScope.launch {
             val cases = SaceBenchmarkDataset.cases
+            val benchmarkRunId = saceBenchmarkStore.beginRun()
             _calibrationState.value = _calibrationState.value.copy(
                 isBenchmarkRunning = true, benchmarkProgress = 0,
                 benchmarkReport = "", benchmarkError = null, thermalMessage = null
@@ -919,7 +920,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             caseId = testCase.id, roleId = testCase.roleId, skill = testCase.skill,
                             completed = succeeded, score = evaluation?.score, confidence = evaluation?.confidence,
                             feedback = evaluation?.feedback ?: failure.orEmpty(),
-                            outputPreview = output.take(400), timestamp = System.currentTimeMillis()
+                            outputPreview = output.take(400), timestamp = System.currentTimeMillis(), runId = benchmarkRunId
                         )
                     )
                     _calibrationState.value = _calibrationState.value.copy(
