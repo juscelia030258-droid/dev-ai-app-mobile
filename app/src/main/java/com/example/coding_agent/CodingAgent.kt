@@ -99,14 +99,27 @@ class CodingAgent(
         )
         val backend = runCatching { RuntimeBackend.valueOf(cfg.runtimeBackend) }
             .getOrDefault(RuntimeBackend.LLAMA_CPP)
-        val customPrompt = cfg.systemPromptOverride?.takeIf { it.isNotBlank() }
+        val storedPrompt = cfg.systemPromptOverride.orEmpty()
+        val useReasoningProfile = storedPrompt.contains("[CODING_REASONING_PROFILE]")
+        val customPrompt = storedPrompt.replace("[CODING_REASONING_PROFILE]", "").trim().takeIf { it.isNotBlank() }
         val terminalGuidanceStart = DEFAULT_SYSTEM_PROMPT.indexOf("TERMINAL UNIVERSAL — FLUXO DE DESENVOLVIMENTO")
-        val sysPrompt = when {
+        val baseSystemPrompt = when {
             customPrompt == null -> DEFAULT_SYSTEM_PROMPT
             customPrompt.contains("[AI CALIBRATION EXAMPLES]") -> customPrompt + "\n\n" + DEFAULT_SYSTEM_PROMPT
             terminalGuidanceStart >= 0 -> customPrompt + "\n\n" + DEFAULT_SYSTEM_PROMPT.substring(terminalGuidanceStart)
             else -> customPrompt + "\n\n" + "TERMINAL UNIVERSAL: identifique Windows/PowerShell/CMD, macOS/zsh/bash ou Linux/bash; gere comandos específicos do shell, indique diretório e resultado esperado, nunca alegue execução sem evidência e peça confirmação antes de operações destrutivas ou alterações do sistema."
         }
+        val reasoningProfilePrompt = """
+            PERFIL REASONING ATIVADO PARA CODING AI
+            - Antes de codificar, decomponha o problema em objetivo, restrições, dependências e critérios de aceite.
+            - Compare opções simples e escolha uma; explique riscos e incertezas importantes.
+            - Siga o fluxo de dados e a causa raiz antes de editar.
+            - Em tarefas grandes, divida em etapas pequenas e valide cada etapa.
+            - Revise a própria solução procurando casos-limite, erros de lógica e efeitos colaterais.
+            - Use linguagem direta e palavras comuns. Não invente termos, resultados ou testes.
+            - Continue sendo a Coding AI: entregue código e alterações concretas quando solicitados.
+        """.trimIndent()
+        val sysPrompt = if (useReasoningProfile) baseSystemPrompt + "\n\n" + reasoningProfilePrompt else baseSystemPrompt
 
         val startTime = System.currentTimeMillis()
         var lastError: String? = null
