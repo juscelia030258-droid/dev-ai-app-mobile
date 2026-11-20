@@ -602,8 +602,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             "ETAPA 4/5 — comparar regiões e identificar erros visuais.",
                             "ETAPA 5/5 — desafio final: produzir uma especificação visual clara para a Coding AI."
                         )
+                        val codingStage = listOf(
+                            "ETAPA 1/5 — firmware: C/C++, ESP32, sensores, GPIO, comunicação e estados seguros.",
+                            "ETAPA 2/5 — interfaces: menus navegáveis, opções, configurações persistentes e validação.",
+                            "ETAPA 3/5 — depuração: localizar causas, corrigir erros e criar testes de regressão.",
+                            "ETAPA 4/5 — integração: organizar um projeto completo em módulos e verificar os contratos entre eles.",
+                            "ETAPA 5/5 — Linux: analisar somente o projeto de laboratório fornecido, revisar scripts e serviços e testar melhorias em ambiente isolado."
+                        )
                         val stagePrefix = when {
                             mode != CalibrationMode.ULTIMATE -> ""
+                            role == AgentRole.CODING -> codingStage[ultimateHour] + " "
                             role == AgentRole.REASONING -> reasoningStage[ultimateHour] + " "
                             role == AgentRole.VISION -> visionStage[ultimateHour] + " "
                             else -> ""
