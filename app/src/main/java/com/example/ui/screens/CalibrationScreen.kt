@@ -77,7 +77,7 @@ fun CalibrationScreen(
                                     Text(option.title)
                                 }
                             } else {
-                                OutlinedButton(onClick = { onModeChange(role, option) }, enabled = !state.isRunning) {
+                                OutlinedButton(onClick = { onModeChange(role, option) }, enabled = !state.isRunning && !state.isBenchmarkRunning) {
                                     Text(option.title)
                                 }
                             }
@@ -92,7 +92,7 @@ fun CalibrationScreen(
                             onValueChange = { onDurationChange(role, it.toInt().coerceIn(range.first, range.last)) },
                             valueRange = range.first.toFloat()..range.last.toFloat(),
                             steps = range.last - range.first - 1,
-                            enabled = !state.isRunning
+                            enabled = !state.isRunning && !state.isBenchmarkRunning
                         )
                         Text("De " + range.first + " a " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -100,7 +100,7 @@ fun CalibrationScreen(
             }
         }
         if (state.isBenchmarkRunning) {
-            Text("Benchmark independente — " + state.benchmarkProgress + " / 9 casos", fontWeight = FontWeight.SemiBold)
+            Text("Benchmark separado — " + state.benchmarkProgress + " / 9 casos", fontWeight = FontWeight.SemiBold)
             LinearProgressIndicator(progress = { (state.benchmarkProgress.toFloat() / 9f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
             state.benchmarkError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
