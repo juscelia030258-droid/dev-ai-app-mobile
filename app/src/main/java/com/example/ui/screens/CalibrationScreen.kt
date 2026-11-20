@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.core.model.AgentRole
+import com.example.ui.CalibrationMode
 import com.example.ui.CalibrationUiState
 
 @Composable
@@ -52,6 +53,7 @@ fun CalibrationScreen(
         )
         agents.forEach { (role, detail, range) ->
             val minutes = durations[role] ?: 20
+            val mode = modes[role] ?: CalibrationMode.NORMAL
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -59,7 +61,10 @@ fun CalibrationScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(role.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("• " + minutes + " min", color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "• " + if (mode == CalibrationMode.ULTIMATE) "5 horas" else "$minutes min",
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                     Text(detail, style = MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
