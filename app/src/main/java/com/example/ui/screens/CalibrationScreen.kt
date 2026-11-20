@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,7 +47,7 @@ fun CalibrationScreen(
         ).forEach { (role, duration, detail) ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -63,7 +61,7 @@ fun CalibrationScreen(
         if (state.isRunning) {
             Text(state.currentCase, fontWeight = FontWeight.SemiBold)
             LinearProgressIndicator(
-                progress = { if (state.totalCases == 0) 0f else state.completedCases.toFloat() / state.totalCases },
+                progress = if (state.totalCases == 0) 0f else state.completedCases.toFloat() / state.totalCases,
                 modifier = Modifier.fillMaxWidth()
             )
             Text(state.completedCases.toString() + " / " + state.totalCases + " exercícios")
