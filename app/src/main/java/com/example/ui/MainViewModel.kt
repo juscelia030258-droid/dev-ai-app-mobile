@@ -60,6 +60,7 @@ data class AgentConsoleState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as LocalDevAiApplication).container
+    private val saceProgressStore = SaceProgressStore(application)
 
     private val diagnosticsRunner = SystemDiagnosticsRunner(
         deviceProfiler = container.deviceProfiler,
@@ -509,8 +510,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val selectedDurations = _calibrationDurations.value
             val selectedModes = _calibrationModes.value
             val sacePrefs = getApplication<Application>().getSharedPreferences("sace_progress", 0)
-            val sessionNumber = sacePrefs.getInt("session_count", 0) + 1
-            sacePrefs.edit().putInt("session_count", sessionNumber).apply()
+            val sessionNumber = saceProgressStore.beginSession()
             val isSurpriseSession = sessionNumber % 5 == 0
             val report = StringBuilder("SACE — sessão #$sessionNumber")
             var completed = 0
@@ -548,7 +548,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     do {
                         if (System.currentTimeMillis() >= roleDeadline) break
                         val cycle = attempt / selectedPool.size
-                        val basePrompt = selectedPool[(initialOffset + attempt) % selectedPool.size]
+                        val exerciseIndex = saceProgressStore.chooseExerciseIndex(
+                            role.id, selectedPool.size, initialOffset + attempt
+                        )
+                        val basePrompt = selectedPool[exerciseIndex]
                         val isLinuxFinalHour = role == AgentRole.CODING &&
                             mode == CalibrationMode.ULTIMATE &&
                             System.currentTimeMillis() - roleStartedAt >= 4 * 60 * 60 * 1000L
@@ -608,6 +611,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 latestOutput = output.takeLast(3500), error = failure
                             )
                         }
+                        val attemptSucceeded = failure == null && output.isNotBlank()
+                        val skillLabel = basePrompt.substringBefore(":").takeIf { it.length <= 80 } ?: "Geral"
+                        saceProgressStore.recordAttempt(
+                            roleId = role.id,
+                            exerciseIndex = exerciseIndex,
+                            skill = skillLabel,
+                            completed = attemptSucceeded,
+                            outputChars = output.length,
+                            error = failure ?: if (output.isBlank()) "Resposta vazia" else null
+                        )
+                        saceProgressStore.saveCheckpoint(
+                            roleId = role.id,
+                            mode = mode.name,
+                            nextAttempt = attempt + 1,
+                            startedAt = roleStartedAt,
+                            sessionNumber = sessionNumber
+                        )
                         if (failure != null || output.isBlank()) {
                             report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
                             if (mode != CalibrationMode.ULTIMATE) break
@@ -629,6 +649,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     report.append("\n• ").append(role.displayName).append(": ")
                         .append(attempt).append(" tentativas nesta sessão.")
+                    report.append("\n").append(saceProgressStore.summaryForRole(role.id))
 
                     if (roleNotes.isNotBlank()) {
                         val dao = container.database.agentConfigDao()
@@ -686,6 +707,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                     }
                 }
+                saceProgressStore.clearCheckpoint()
                 _calibrationState.value = _calibrationState.value.copy(
                     isRunning = false, currentRole = null, currentCase = "Calibração concluída",
                     report = "Sessão concluída. Respostas concluídas foram registradas como exemplos nos prompts especializados.\n" + report
