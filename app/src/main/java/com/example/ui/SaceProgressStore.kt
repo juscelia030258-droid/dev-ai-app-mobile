@@ -134,10 +134,10 @@ class SaceProgressStore(context: Context) {
     }
 
     fun readCheckpoint(): SaceCheckpoint? = synchronized(lock) {
-        val json = runCatching { JSONObject(prefs.getString(KEY_CHECKPOINT, null) ?: return null) }.getOrNull()
-            ?: return null
-        val role = json.optString("role").takeIf { it in setOf("coding", "reasoning", "vision") } ?: return null
-        val mode = json.optString("mode").takeIf { it in CalibrationMode.entries.map { entry -> entry.name } } ?: return null
+        val raw = prefs.getString(KEY_CHECKPOINT, null) ?: return@synchronized null
+        val json = runCatching { JSONObject(raw) }.getOrNull() ?: return@synchronized null
+        val role = json.optString("role").takeIf { it in setOf("coding", "reasoning", "vision") } ?: return@synchronized null
+        val mode = json.optString("mode").takeIf { it in CalibrationMode.entries.map { entry -> entry.name } } ?: return@synchronized null
         SaceCheckpoint(
             roleId = role,
             mode = mode,
