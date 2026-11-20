@@ -31,6 +31,9 @@ class VisionAgent(
             - Não repita palavras, frases, parágrafos ou a descrição completa da imagem.
             - Não narre continuamente o que está vendo nem reinicie a análise.
             - Se um texto ou objeto já foi descrito, não o descreva novamente.
+            - Limite absoluto: no máximo 200 palavras por resposta. Nunca ultrapasse esse limite.
+            - Em análises completas, procure entregar aproximadamente 80 a 200 palavras; em perguntas simples, responda naturalmente com menos de 80.
+            - Encerre assim que transmitir os achados relevantes. Não continue descrevendo a mesma imagem.
             - Seja concisa por padrão: use poucos tópicos e evite introduções longas.
             - Se não conseguir identificar algo, diga que não está nítido; não invente.
             - Em interfaces, destaque apenas textos legíveis, elementos importantes, estado e problemas visíveis.
@@ -77,7 +80,7 @@ class VisionAgent(
         val params = InferenceParameters(
             contextLength = cfg.contextLength,
             // Short, bounded visual answers for compact vision models such as SmolVLM 500M.
-            maxTokens = (maxTokensOverride ?: cfg.maxTokens).coerceIn(64, 384),
+            maxTokens = (maxTokensOverride ?: cfg.maxTokens).coerceIn(64, 320),
             temperature = (temperatureOverride ?: cfg.temperature).coerceIn(0.1f, 0.35f),
             topP = cfg.topP,
             topK = cfg.topK,
@@ -90,6 +93,8 @@ class VisionAgent(
         val startTime = System.currentTimeMillis()
         var lastError: String? = null
         var fullOutput = ""
+        var streamedOutput = ""
+        var emittedCharacters = 0
 
         runtimeManager.streamInference(
             role = AgentRole.VISION,
@@ -100,11 +105,24 @@ class VisionAgent(
             params = params
         ).collect { ev ->
             when (ev) {
-                is InferenceStreamEvent.Completed -> fullOutput = ev.fullText
-                is InferenceStreamEvent.Failed -> lastError = ev.errorMessage
-                else -> Unit
+                is InferenceStreamEvent.Token -> {
+                    streamedOutput += ev.text
+                    val bounded = limitWords(streamedOutput, 200)
+                    if (bounded.length > emittedCharacters) {
+                        emit(InferenceStreamEvent.Token(bounded.substring(emittedCharacters)))
+                        emittedCharacters = bounded.length
+                    }
+                }
+                is InferenceStreamEvent.Completed -> {
+                    fullOutput = limitWords(ev.fullText, 200)
+                    emit(ev.copy(fullText = fullOutput))
+                }
+                is InferenceStreamEvent.Failed -> {
+                    lastError = ev.errorMessage
+                    emit(ev)
+                }
+                is InferenceStreamEvent.Status -> emit(ev)
             }
-            emit(ev)
         }
 
         historyDao.insert(
@@ -120,6 +138,13 @@ class VisionAgent(
                 errorMessage = lastError
             )
         )
+    }
+
+    private fun limitWords(text: String, maxWords: Int): String {
+        val matches = Regex("\\S+").findAll(text).take(maxWords + 1).toList()
+        if (matches.size <= maxWords) return text
+        val end = matches[maxWords - 1].range.last + 1
+        return text.substring(0, end).trimEnd()
     }
 
     suspend fun executeBlocking(
