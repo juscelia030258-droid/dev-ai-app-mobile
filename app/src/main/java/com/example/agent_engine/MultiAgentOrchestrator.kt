@@ -121,6 +121,9 @@ class MultiAgentOrchestrator(
             if ("code_tester" in settings.enabledExtensions) {
                 appendLine("CODE TESTER ATIVO: proponha testes reproduzíveis, casos-limite e critérios de aprovação. Diferencie testes sugeridos de testes realmente executados; não simule execução.")
             }
+            if ("universal_terminal" in settings.enabledExtensions) {
+                appendLine("UNIVERSAL TERMINAL ATIVO PARA A CODING AI: identifique Windows/PowerShell/CMD, macOS/zsh/bash ou Linux/bash pelo contexto do projeto. Gere comandos e scripts específicos do shell, indique diretório e resultado esperado, leia resultados reais quando o cliente fornecer execução de terminal e nunca alegue execução sem evidência. O servidor Android não executa comandos no computador remoto; use a integração de terminal do cliente, como Qoder, quando disponível. Solicite confirmação antes de comandos destrutivos, instalação ou alterações do sistema.")
+            }
             if ("system_tools" in settings.enabledExtensions) {
                 val profile = deviceProfiler.captureProfile(settings.ramLimitMb)
                 appendLine("SYSTEM TOOLS — DIAGNÓSTICO REAL DO DISPOSITIVO:")
