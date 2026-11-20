@@ -25,7 +25,7 @@ class SaceAnswerEvaluatorTest {
     @Test
     fun promptExplainsThatVisionReviewHasNoImage() {
         val prompt = SaceAnswerEvaluator.buildPrompt("Vision AI", "Descreva a tela", "Há dois botões.")
-        assertEquals(true, prompt.contains("não há imagem disponível"))
+        assertEquals(true, prompt.contains("imagem anexada"))
         assertEquals(true, prompt.contains("correção técnica/lógica"))
     }
 }
