@@ -465,10 +465,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _calibrationState = MutableStateFlow(CalibrationUiState())
     val calibrationState: StateFlow<CalibrationUiState> = _calibrationState.asStateFlow()
     private var calibrationJob: Job? = null
+    private var pauseRequested = false
 
-    private suspend fun evaluateCalibrationAnswer(role: AgentRole, exercise: String, answer: String): SaceEvaluation? {
+    init {
+        if (saceProgressStore.readCheckpoint() != null) {
+            _calibrationState.value = _calibrationState.value.copy(
+                canResume = true,
+                currentCase = "Sessão anterior encontrada — pronta para continuar."
+            )
+        }
+    }
+
+    private suspend fun awaitSafeSaceConditions() {
+        val startedWaiting = System.currentTimeMillis()
+        while (true) {
+            val profile = container.deviceProfiler.captureProfile()
+            val thermal = profile.thermalStatusLabel
+            val severeThermal = container.deviceProfiler.isThermalSevereOrCritical()
+            val lowMemory = container.deviceProfiler.isSystemLowMemory() || profile.availableRamMb < 650L
+            if (!severeThermal && !lowMemory) {
+                _calibrationState.value = _calibrationState.value.copy(thermalMessage = null)
+                if (thermal.contains("leve", ignoreCase = true) || thermal.contains("Moderado", ignoreCase = true)) delay(4_000L)
+                return
+            }
+            val reason = buildList {
+                if (severeThermal) add("temperatura elevada ($thermal)")
+                if (lowMemory) add("pouca RAM livre (${profile.availableRamMb} MB)")
+            }.joinToString(" e ")
+            _calibrationState.value = _calibrationState.value.copy(thermalMessage = "Treinamento em espera por segurança: $reason.")
+            if (System.currentTimeMillis() - startedWaiting >= 180_000L) {
+                throw IllegalStateException("SACE pausado automaticamente: $reason. Aguarde o aparelho esfriar/liberar memória e retome.")
+            }
+            delay(15_000L)
+        }
+    }
+
+    private suspend fun evaluateCalibrationAnswer(
+        role: AgentRole,
+        exercise: String,
+        answer: String,
+        imagePath: String? = null
+    ): SaceEvaluation? {
         val reviewPrompt = SaceAnswerEvaluator.buildPrompt(role.displayName, exercise, answer)
-        val reviewTurns = listOf(ChatTurn("user", reviewPrompt))
+        val reviewTurns = listOf(ChatTurn("user", reviewPrompt, imagePath = if (role == AgentRole.VISION) imagePath else null))
         val reviewResult = when (role) {
             AgentRole.CODING -> container.codingAgent.executeBlocking(reviewTurns, "SACE_SECOND_PASS_REVIEW")
             AgentRole.REASONING -> container.reasoningAgent.executeBlocking(
@@ -483,10 +522,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return SaceAnswerEvaluator.parse(review)
     }
 
-    fun startCalibration() {
+    fun startCalibration(resume: Boolean = false) {
         if (_calibrationState.value.isRunning) return
         calibrationJob?.cancel()
+        pauseRequested = false
         calibrationJob = viewModelScope.launch {
+            val savedCheckpoint = if (resume) saceProgressStore.readCheckpoint() else null
             val roles = listOf(AgentRole.CODING, AgentRole.REASONING, AgentRole.VISION)
             val cases = mapOf(
                 AgentRole.CODING to listOf(
@@ -559,7 +600,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val selectedDurations = _calibrationDurations.value
             val selectedModes = _calibrationModes.value
             val sacePrefs = getApplication<Application>().getSharedPreferences("sace_progress", 0)
-            val sessionNumber = saceProgressStore.beginSession()
+            val sessionNumber = savedCheckpoint?.sessionNumber?.takeIf { it > 0 } ?: saceProgressStore.beginSession()
             val isSurpriseSession = sessionNumber % 5 == 0
             val report = StringBuilder("SACE — sessão #$sessionNumber")
             var completed = 0
@@ -575,10 +616,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
             InferenceTaskForegroundService.startTask(getApplication())
             try {
-                for (role in roles) {
-                    val mode = selectedModes[role] ?: CalibrationMode.NORMAL
+                val resumeRoleIndex = savedCheckpoint?.let { cp -> roles.indexOfFirst { it.id == cp.roleId }.coerceAtLeast(0) } ?: 0
+                for (role in roles.drop(resumeRoleIndex)) {
+                    val isResumingThisRole = savedCheckpoint?.roleId == role.id
+                    val mode = if (isResumingThisRole) runCatching { CalibrationMode.valueOf(savedCheckpoint!!.mode) }.getOrDefault(selectedModes[role] ?: CalibrationMode.NORMAL) else (selectedModes[role] ?: CalibrationMode.NORMAL)
                     val durationMinutes = if (mode == CalibrationMode.ULTIMATE) 300 else selectedDurations.getValue(role)
-                    val roleDeadline = System.currentTimeMillis() + durationMinutes * 60_000L
+                    val roleStartedAt = if (isResumingThisRole) savedCheckpoint!!.startedAt else System.currentTimeMillis()
+                    val roleDeadline = roleStartedAt + durationMinutes * 60_000L
                     report.append("\n\n").append(role.displayName).append(" — ").append(mode.title)
                         .append(": limite de ").append(durationMinutes).append(" min.")
                     _calibrationState.value = _calibrationState.value.copy(
@@ -592,13 +636,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         CalibrationMode.ULTIMATE -> pool
                     }
                     val initialOffset = sacePrefs.getInt("next_${role.id}", 0).coerceAtLeast(0)
-                    val roleStartedAt = System.currentTimeMillis()
-                    var attempt = 0
+                    var attempt = if (isResumingThisRole) savedCheckpoint!!.nextAttempt else 0
+                    val exerciseBaseOffset = if (isResumingThisRole) initialOffset - attempt else initialOffset
                     do {
                         if (System.currentTimeMillis() >= roleDeadline) break
                         val cycle = attempt / selectedPool.size
                         val exerciseIndex = saceProgressStore.chooseExerciseIndex(
-                            role.id, selectedPool.size, initialOffset + attempt
+                            role.id, selectedPool.size, exerciseBaseOffset + attempt
                         )
                         val basePrompt = selectedPool[exerciseIndex]
                         val isLinuxFinalHour = role == AgentRole.CODING &&
@@ -646,9 +690,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 if (mode == CalibrationMode.ULTIMATE) " — ciclo " + (cycle + 1) else "",
                             latestOutput = "", error = null
                         )
+                        saceProgressStore.saveCheckpoint(
+                            roleId = role.id, mode = mode.name, nextAttempt = attempt,
+                            startedAt = roleStartedAt, sessionNumber = sessionNumber
+                        )
+                        awaitSafeSaceConditions()
+                        if (pauseRequested) throw kotlinx.coroutines.CancellationException("Pausa solicitada pelo usuário")
+                        val calibrationImagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
                         val turns = listOf(ChatTurn(
                             role = "user", text = prompt,
-                            imagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
+                            imagePath = calibrationImagePath
                         ))
                         var output = ""
                         var failure: String? = null
@@ -671,7 +722,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val attemptSucceeded = failure == null && output.isNotBlank()
                         val evaluation = if (attemptSucceeded) {
                             try {
-                                evaluateCalibrationAnswer(role, prompt, output)
+                                evaluateCalibrationAnswer(role, prompt, output, calibrationImagePath)
                             } catch (_: Exception) {
                                 null
                             }
@@ -717,7 +768,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         if (attemptSucceeded) completed++
                         attempt++
-                        sacePrefs.edit().putInt("next_${role.id}", (initialOffset + attempt) % selectedPool.size).apply()
+                        sacePrefs.edit().putInt("next_${role.id}", (exerciseBaseOffset + attempt) % selectedPool.size).apply()
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                         if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
                     } while (
@@ -795,16 +846,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 saceProgressStore.clearCheckpoint()
                 _calibrationState.value = _calibrationState.value.copy(
-                    isRunning = false, currentRole = null, currentCase = "Calibração concluída",
+                    isRunning = false, currentRole = null, currentCase = "Calibração concluída", canResume = false, isPaused = false,
                     report = "Sessão concluída. Respostas geradas sem erro de inferência foram registradas como exemplos. Isso não significa que cada solução foi validada como correta.\n" + report
                 )
                 _uiBannerMessage.value = "AI Calibration Lab: sessão concluída. Perfis de referência atualizados."
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                _calibrationState.value = _calibrationState.value.copy(isRunning = false, currentCase = "Sessão interrompida")
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false, isPaused = true, canResume = saceProgressStore.readCheckpoint() != null,
+                    currentCase = "Sessão pausada — o próximo exercício foi salvo."
+                )
                 throw cancelled
             } catch (error: Exception) {
                 _calibrationState.value = _calibrationState.value.copy(
-                    isRunning = false, error = error.message ?: "Falha inesperada na calibração."
+                    isRunning = false, isPaused = false, canResume = saceProgressStore.readCheckpoint() != null,
+                    currentCase = "Sessão interrompida com checkpoint salvo.",
+                    error = error.message ?: "Falha inesperada na calibração."
                 )
             } finally {
                 container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração")
@@ -813,13 +869,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun stopCalibration() {
+    fun pauseCalibration() {
+        if (!_calibrationState.value.isRunning) return
+        pauseRequested = true
         calibrationJob?.cancel()
         calibrationJob = null
         viewModelScope.launch {
-            container.inferenceRuntimeManager.unloadAllModels("Calibração interrompida pelo usuário")
+            container.inferenceRuntimeManager.unloadAllModels("SACE pausado pelo usuário")
         }
-        _calibrationState.value = _calibrationState.value.copy(isRunning = false, currentCase = "Sessão interrompida")
+    }
+
+    fun resumeCalibration() {
+        if (_calibrationState.value.isRunning || saceProgressStore.readCheckpoint() == null) return
+        startCalibration(resume = true)
+    }
+
+    fun stopCalibration() = pauseCalibration()
+
+    fun discardCalibrationCheckpoint() {
+        if (_calibrationState.value.isRunning) return
+        saceProgressStore.clearCheckpoint()
+        _calibrationState.value = _calibrationState.value.copy(canResume = false, isPaused = false, currentCase = "Checkpoint descartado.")
     }
 
     private fun createCalibrationImage(variant: Int = 0): String {

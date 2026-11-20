@@ -395,8 +395,10 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             modes = calibrationModes,
                             onModeChange = viewModel::setCalibrationMode,
                             onDurationChange = viewModel::setCalibrationDuration,
-                            onStart = viewModel::startCalibration,
-                            onStop = viewModel::stopCalibration
+                            onStart = { viewModel.startCalibration() },
+                            onStop = viewModel::pauseCalibration,
+                            onResume = viewModel::resumeCalibration,
+                            onDiscardCheckpoint = viewModel::discardCalibrationCheckpoint
                         )
                     }
                     composable<SettingsRoute> {

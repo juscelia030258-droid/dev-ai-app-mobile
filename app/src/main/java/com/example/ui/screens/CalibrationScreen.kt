@@ -34,7 +34,9 @@ fun CalibrationScreen(
     onModeChange: (AgentRole, CalibrationMode) -> Unit,
     onDurationChange: (AgentRole, Int) -> Unit,
     onStart: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onResume: () -> Unit,
+    onDiscardCheckpoint: () -> Unit
 ) {
     val agents = listOf(
         Triple(AgentRole.CODING, "Firmware, menus funcionais, configurações, Kotlin, Python, depuração e Linux no Ultimate.", 1..120),
@@ -113,9 +115,23 @@ fun CalibrationScreen(
                     Text(state.latestOutput, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
                 }
             }
-            OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Interromper calibração") }
+            state.thermalMessage?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Pausar e salvar progresso") }
         } else {
-            Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("Iniciar calibração completa") }
+            if (state.canResume) {
+                Text(
+                    state.currentCase.ifBlank { "Existe uma sessão SACE que pode ser retomada." },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Button(onClick = onResume, modifier = Modifier.fillMaxWidth()) { Text("Retomar sessão salva") }
+                OutlinedButton(onClick = onDiscardCheckpoint, modifier = Modifier.fillMaxWidth()) { Text("Descartar sessão salva") }
+            }
+            Button(onClick = onStart, modifier = Modifier.fillMaxWidth(), enabled = !state.canResume) {
+                Text(if (state.canResume) "Descarte a sessão para iniciar outra" else "Iniciar calibração completa")
+            }
         }
         state.error?.let { Text("Aviso: " + it, color = MaterialTheme.colorScheme.error) }
         if (state.report.isNotBlank()) {

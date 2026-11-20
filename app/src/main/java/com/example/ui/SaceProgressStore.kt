@@ -8,6 +8,14 @@ import org.json.JSONObject
  * Compact, persistent SACE history.
  * This records execution outcomes and exercise rotation; completion is not proof of correctness.
  */
+data class SaceCheckpoint(
+    val roleId: String,
+    val mode: String,
+    val nextAttempt: Int,
+    val startedAt: Long,
+    val sessionNumber: Int
+)
+
 class SaceProgressStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("sace_progress", Context.MODE_PRIVATE)
     private val lock = Any()
@@ -123,6 +131,20 @@ class SaceProgressStore(context: Context) {
             .put("session", sessionNumber)
             .put("savedAt", System.currentTimeMillis())
         prefs.edit().putString(KEY_CHECKPOINT, checkpoint.toString()).apply()
+    }
+
+    fun readCheckpoint(): SaceCheckpoint? = synchronized(lock) {
+        val raw = prefs.getString(KEY_CHECKPOINT, null) ?: return@synchronized null
+        val json = runCatching { JSONObject(raw) }.getOrNull() ?: return@synchronized null
+        val role = json.optString("role").takeIf { it in setOf("coding", "reasoning", "vision") } ?: return@synchronized null
+        val mode = json.optString("mode").takeIf { it in CalibrationMode.entries.map { entry -> entry.name } } ?: return@synchronized null
+        SaceCheckpoint(
+            roleId = role,
+            mode = mode,
+            nextAttempt = json.optInt("nextAttempt", 0).coerceAtLeast(0),
+            startedAt = json.optLong("startedAt", System.currentTimeMillis()),
+            sessionNumber = json.optInt("session", 0).coerceAtLeast(0)
+        )
     }
 
     fun clearCheckpoint() {
