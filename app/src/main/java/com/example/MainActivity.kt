@@ -389,6 +389,8 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                     composable<CalibrationRoute> {
                         CalibrationScreen(
                             state = calibrationState,
+                            durations = calibrationDurations,
+                            onDurationChange = viewModel::setCalibrationDuration,
                             onStart = viewModel::startCalibration,
                             onStop = viewModel::stopCalibration
                         )
