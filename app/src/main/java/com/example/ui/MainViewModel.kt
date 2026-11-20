@@ -678,7 +678,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             report.append("\n• ").append(role.displayName).append(" — exercício ")
                                 .append(attempt + 1).append(": concluído.")
                         }
-                        completed++
+                        if (attemptSucceeded) completed++
                         attempt++
                         sacePrefs.edit().putInt("next_${role.id}", (initialOffset + attempt) % selectedPool.size).apply()
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
@@ -737,13 +737,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 latestOutput = output.takeLast(2500), error = failure
                             )
                         }
+                        val surpriseSucceeded = failure == null && output.isNotBlank()
+                        saceProgressStore.recordAttempt(
+                            roleId = role.id,
+                            exerciseIndex = 1000 + sessionNumber,
+                            skill = "Teste surpresa",
+                            completed = surpriseSucceeded,
+                            outputChars = output.length,
+                            error = failure ?: if (output.isBlank()) "Resposta vazia" else null
+                        )
                         sacePrefs.edit()
                             .putString("surprise_${role.id}", output.take(600))
                             .putLong("surprise_time_${role.id}", System.currentTimeMillis())
                             .apply()
                         report.append("\n• ").append(role.displayName)
-                            .append(if (failure == null && output.isNotBlank()) ": resposta registrada para avaliação." else ": teste não concluído — " + failure)
-                        completed++
+                            .append(if (surpriseSucceeded) ": resposta registrada para avaliação." else ": teste não concluído — " + failure)
+                        if (surpriseSucceeded) completed++
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                     }
                 }
