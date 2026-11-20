@@ -114,7 +114,10 @@ fun AgentsScreen(
 
     var promptInput by remember(selectedRole) { mutableStateOf("") }
     var customSystemPrompt by remember(selectedRole, currentConfig.systemPromptOverride) {
-        mutableStateOf(currentConfig.systemPromptOverride.orEmpty())
+        mutableStateOf(currentConfig.systemPromptOverride.orEmpty().replace("[CODING_REASONING_PROFILE]", "").trim())
+    }
+    var codingReasoningProfile by remember(selectedRole, currentConfig.systemPromptOverride) {
+        mutableStateOf(currentConfig.systemPromptOverride.orEmpty().contains("[CODING_REASONING_PROFILE]"))
     }
     var showParams by remember { mutableStateOf(false) }
     var modelDropdownExpanded by remember { mutableStateOf(false) }
@@ -373,6 +376,19 @@ fun AgentsScreen(
                                 steps = 4
                             )
 
+                            if (selectedRole == AgentRole.CODING) {
+                                FilterChip(
+                                    selected = codingReasoningProfile,
+                                    onClick = { codingReasoningProfile = !codingReasoningProfile },
+                                    label = { Text("Coding AI pensa — perfil Reasoning") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text(
+                                    "Usa o mesmo modelo da Coding AI, com instruções extras de análise e planejamento. Não carrega uma segunda IA.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
                             OutlinedTextField(
                                 value = customSystemPrompt,
@@ -391,7 +407,7 @@ fun AgentsScreen(
                                     onClick = {
                                         onUpdateConfig(
                                             currentConfig.copy(
-                                                systemPromptOverride = customSystemPrompt.trim().takeIf { it.isNotBlank() }
+                                                systemPromptOverride = (customSystemPrompt.trim() + if (selectedRole == AgentRole.CODING && codingReasoningProfile) "\n[CODING_REASONING_PROFILE]" else "").trim().takeIf { it.isNotBlank() }
                                             )
                                         )
                                         onBannerMessage("System prompt de ${selectedRole.displayName} salvo.")
@@ -404,6 +420,7 @@ fun AgentsScreen(
                                     TextButton(
                                         onClick = {
                                             customSystemPrompt = ""
+                                            codingReasoningProfile = false
                                             onUpdateConfig(currentConfig.copy(systemPromptOverride = null))
                                             onBannerMessage("System prompt restaurado ao padrão.")
                                         }
