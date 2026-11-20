@@ -156,6 +156,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
     val bannerMessage by viewModel.uiBannerMessage.collectAsStateWithLifecycle()
     val calibrationState by viewModel.calibrationState.collectAsStateWithLifecycle()
     val calibrationDurations by viewModel.calibrationDurations.collectAsStateWithLifecycle()
+    val calibrationModes by viewModel.calibrationModes.collectAsStateWithLifecycle()
 
     LaunchedEffect(bannerMessage) {
         val msg = bannerMessage
@@ -391,6 +392,8 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                         CalibrationScreen(
                             state = calibrationState,
                             durations = calibrationDurations,
+                            modes = calibrationModes,
+                            onModeChange = viewModel::setCalibrationMode,
                             onDurationChange = viewModel::setCalibrationDuration,
                             onStart = viewModel::startCalibration,
                             onStop = viewModel::stopCalibration
