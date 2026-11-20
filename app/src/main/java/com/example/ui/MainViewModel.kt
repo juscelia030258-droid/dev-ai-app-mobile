@@ -733,8 +733,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         paint.color = Color.rgb(47, 55, 72); canvas.drawRoundRect(32f, 82f, 174f, 326f, 12f, 12f, paint)
         paint.color = Color.rgb(110, 170, 245); canvas.drawRoundRect(46f, (102 + active * 42).toFloat(), 160f, (136 + active * 42).toFloat(), 8f, 8f, paint)
         paint.color = Color.LTGRAY; paint.textSize = 13f
-        canvas.drawText(navItems[safeVariant], 52f, (124 + active * 42).toFloat(), paint)
-        canvas.drawText("Projects", 52f, 164f, paint); canvas.drawText("Settings", 52f, 194f, paint)
+        val navLabels = mutableListOf("Dashboard", "Projects", "Settings")
+        navLabels[active] = navItems[safeVariant]
+        navLabels.forEachIndexed { index, label ->
+            canvas.drawText(label, 52f, (124 + index * 42).toFloat(), paint)
+        }
         paint.color = Color.rgb(62, 73, 94); canvas.drawRoundRect(192f, 84f, 606f, 326f, 14f, 14f, paint)
         paint.color = Color.WHITE; paint.textSize = 21f; canvas.drawText("Welcome back", 218f, 124f, paint)
         paint.color = Color.rgb(93, 161, 226); canvas.drawRoundRect(218f, 150f, 568f, 224f, 12f, 12f, paint)
