@@ -61,6 +61,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as LocalDevAiApplication).container
     private val saceProgressStore = SaceProgressStore(application)
+    private val saceBenchmarkStore = SaceBenchmarkStore(application)
 
     private val diagnosticsRunner = SystemDiagnosticsRunner(
         deviceProfiler = container.deviceProfiler,
