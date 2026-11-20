@@ -670,7 +670,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         val attemptSucceeded = failure == null && output.isNotBlank()
                         val evaluation = if (attemptSucceeded) {
-                            runCatching { evaluateCalibrationAnswer(role, prompt, output) }.getOrNull()
+                            try {
+                                evaluateCalibrationAnswer(role, prompt, output)
+                            } catch (_: Exception) {
+                                null
+                            }
                         } else null
                         val skillLabel = basePrompt.substringBefore(":").takeIf { it.length <= 80 } ?: "Geral"
                         saceProgressStore.recordAttempt(
