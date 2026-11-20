@@ -637,11 +637,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     val initialOffset = sacePrefs.getInt("next_${role.id}", 0).coerceAtLeast(0)
                     var attempt = if (isResumingThisRole) savedCheckpoint!!.nextAttempt else 0
+                    val exerciseBaseOffset = if (isResumingThisRole) initialOffset - attempt else initialOffset
                     do {
                         if (System.currentTimeMillis() >= roleDeadline) break
                         val cycle = attempt / selectedPool.size
                         val exerciseIndex = saceProgressStore.chooseExerciseIndex(
-                            role.id, selectedPool.size, initialOffset + attempt
+                            role.id, selectedPool.size, exerciseBaseOffset + attempt
                         )
                         val basePrompt = selectedPool[exerciseIndex]
                         val isLinuxFinalHour = role == AgentRole.CODING &&
@@ -767,7 +768,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         if (attemptSucceeded) completed++
                         attempt++
-                        sacePrefs.edit().putInt("next_${role.id}", (initialOffset + attempt) % selectedPool.size).apply()
+                        sacePrefs.edit().putInt("next_${role.id}", (exerciseBaseOffset + attempt) % selectedPool.size).apply()
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                         if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
                     } while (
