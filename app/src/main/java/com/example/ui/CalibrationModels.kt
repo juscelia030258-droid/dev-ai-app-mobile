@@ -16,5 +16,8 @@ data class CalibrationUiState(
     val currentCase: String = "",
     val latestOutput: String = "",
     val report: String = "",
-    val error: String? = null
+    val error: String? = null,
+    val isPaused: Boolean = false,
+    val canResume: Boolean = false,
+    val thermalMessage: String? = null
 )
