@@ -42,7 +42,7 @@ class ModelRepository(
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .followRedirects(true)
-        .followSslRedirects(true)
+        .followSslRedirects(false)
         .build()
 
     private val _downloadState = MutableStateFlow<DownloadProgressState?>(null)
@@ -57,16 +57,16 @@ class ModelRepository(
 
     val recommendedPresets: List<RecommendedModelPreset> = listOf(
         RecommendedModelPreset(
-            id = "qwen2_5_coder_1_5b_q4",
-            name = "Qwen2.5-Coder 1.5B Instruct (Q4_K_M)",
+            id = "qwen2_5_coder_3b_q4_k_m",
+            name = "Qwen2.5-Coder 3B Instruct (Q4_K_M)",
             recommendedRole = AgentRole.CODING,
             format = ModelFormat.GGUF,
-            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-            estimatedSizeMb = 986L,
-            estimatedRamMb = 1550L,
+            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+            estimatedSizeMb = 2100L,
+            estimatedRamMb = 2900L,
             supportsVision = false,
             quantization = "Q4_K_M",
-            notes = "Modelo compacto e rápido de programação para ARM64 (8 GB RAM). Ideal para Qoder."
+            notes = "Modelo especializado em programação; contexto adaptativo e execução sequencial recomendados em celulares."
         ),
         RecommendedModelPreset(
             id = "smolvlm_500m_vision",
@@ -82,16 +82,16 @@ class ModelRepository(
             notes = "Visão multimodal real com projetor mmproj para análise de capturas de tela e UI."
         ),
         RecommendedModelPreset(
-            id = "deepseek_r1_qwen_1_5b_q4",
-            name = "DeepSeek-R1 Distill Qwen 1.5B (Q4_K_M)",
+            id = "phi4_mini_instruct_q4_k_m",
+            name = "Phi-4-mini-instruct (Q4_K_M)",
             recommendedRole = AgentRole.REASONING,
             format = ModelFormat.GGUF,
-            downloadUrl = "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-            estimatedSizeMb = 1120L,
-            estimatedRamMb = 1720L,
+            downloadUrl = "https://huggingface.co/tensorblock/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf",
+            estimatedSizeMb = 2492L,
+            estimatedRamMb = 3300L,
             supportsVision = false,
             quantization = "Q4_K_M",
-            notes = "Especializado em raciocínio estruturado, planejamento de tarefas e verificação crítica."
+            notes = "Modelo geral para raciocínio e planejamento; contexto adaptativo e execução sequencial recomendados em celulares."
         ),
         RecommendedModelPreset(
             id = "qwen3_0_6b_litert",
@@ -190,6 +190,12 @@ class ModelRepository(
         var destFile: File? = null
         var mmprojFile: File? = null
         runCatching {
+            require(url.startsWith("https://", ignoreCase = true)) {
+                "Downloads de modelos exigem uma URL HTTPS segura."
+            }
+            require(mmprojUrl.isNullOrBlank() || mmprojUrl.startsWith("https://", ignoreCase = true)) {
+                "O download do projetor mmproj também exige HTTPS."
+            }
             val fileName = url.substringAfterLast('/').substringBefore('?')
                 .ifBlank { "${presetId}.gguf" }
                 .replace(Regex("[^a-zA-Z0-9._-]"), "_")
@@ -269,13 +275,15 @@ class ModelRepository(
 
     suspend fun attachMmprojToModel(modelId: String, mmprojUri: Uri): Result<LocalModelEntity> =
         withContext(Dispatchers.IO) {
+            var newProjector: File? = null
             runCatching {
                 val existing = localModelDao.getById(modelId)
                     ?: throw IllegalStateException("Modelo não encontrado.")
                 val projName = resolveDisplayName(mmprojUri) ?: "mmproj.gguf"
-                val destProj = File(modelsDir, "${UUID.randomUUID().toString().take(6)}_${projName.replace(Regex("[^a-zA-Z0-9._-]"), "_")}")
+                val safeName = projName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                val destProj = File(modelsDir, "${UUID.randomUUID().toString().take(6)}_${safeName}")
+                newProjector = destProj
                 copyUriToFile(mmprojUri, destProj)
-                existing.mmprojPath?.let { runCatching { File(it).delete() } }
 
                 val budgetMb = memoryBudgetManager.state.value.userConfiguredRamLimitMb
                 val validation = ModelValidator.validateModelFile(
@@ -284,6 +292,12 @@ class ModelRepository(
                     safeRamBudgetMb = budgetMb,
                     supportsVisionFlag = true
                 )
+                if (validation.status == CompatibilityStatus.CORRUPTED_OR_INVALID ||
+                    validation.status == CompatibilityStatus.MISSING_VISION_PROJECTOR
+                ) {
+                    throw IllegalArgumentException(validation.detail)
+                }
+
                 val updated = existing.copy(
                     mmprojPath = destProj.absolutePath,
                     supportsVision = validation.supportsVision,
@@ -292,7 +306,14 @@ class ModelRepository(
                     compatibilityDetail = validation.detail
                 )
                 localModelDao.upsert(updated)
+                // Keep the previous projector until the new one is fully copied, validated and saved.
+                existing.mmprojPath?.takeIf { it != destProj.absolutePath }?.let {
+                    runCatching { File(it).delete() }
+                }
+                newProjector = null
                 updated
+            }.onFailure {
+                newProjector?.let { runCatching { it.delete() } }
             }
         }
 

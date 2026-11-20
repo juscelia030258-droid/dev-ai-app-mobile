@@ -66,6 +66,12 @@ class LocalDevAiIntegrationTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val container = (context.applicationContext as LocalDevAiApplication).container
 
+        val adaptiveHeadroom = container.deviceProfiler.recommendedMemoryHeadroomMb()
+        assertTrue("Adaptive headroom must remain bounded", adaptiveHeadroom in 256L..512L)
+        val presetIds = container.modelRepository.recommendedPresets.map { it.id }
+        assertTrue(presetIds.contains("phi4_mini_instruct_q4_k_m"))
+        assertTrue(presetIds.contains("qwen2_5_coder_3b_q4_k_m"))
+
         val (fitsHuge, reason) = container.memoryBudgetManager.checkCanFitModel(
             requestedFootprintMb = 9200L,
             currentlyLoadedMb = 0L,

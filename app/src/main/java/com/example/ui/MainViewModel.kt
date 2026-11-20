@@ -2,6 +2,10 @@ package com.example.ui
 
 import android.app.Application
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.LocalDevAiApplication
@@ -10,6 +14,8 @@ import com.example.api_server.ApiServerStatus
 import com.example.api_server.LocalApiForegroundService
 import com.example.api_server.InferenceTaskForegroundService
 import com.example.api_server.NetworkAddressState
+import com.example.extensions.ExtensionCatalog
+import com.example.extensions.LocalExtension
 import com.example.core.model.AgentRole
 import com.example.core.model.AgentRuntimeState
 import com.example.core.model.DiagnosticCheckResult
@@ -96,6 +102,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recommendedPresets: List<RecommendedModelPreset> = container.modelRepository.recommendedPresets
+    val extensions: List<LocalExtension> = ExtensionCatalog.all
+
+    fun toggleExtension(id: String, enabled: Boolean) {
+        viewModelScope.launch { container.settingsRepository.updateExtensionEnabled(id, enabled) }
+    }
 
     private val _primaryKeyPlaintext = MutableStateFlow<String?>(null)
     val primaryKeyPlaintext: StateFlow<String?> = _primaryKeyPlaintext.asStateFlow()
@@ -421,6 +432,326 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopAgentConsole(role: AgentRole) {
         consoleJobs.remove(role)?.cancel()
         updateConsole(role) { it.copy(isGenerating = false) }
+    }
+
+
+    // --- AI Calibration Lab ---
+    private val _calibrationDurations = MutableStateFlow(
+        mapOf(AgentRole.CODING to 60, AgentRole.REASONING to 45, AgentRole.VISION to 20)
+    )
+    private val _calibrationModes = MutableStateFlow(
+        mapOf(
+            AgentRole.CODING to CalibrationMode.NORMAL,
+            AgentRole.REASONING to CalibrationMode.NORMAL,
+            AgentRole.VISION to CalibrationMode.NORMAL
+        )
+    )
+    val calibrationModes: StateFlow<Map<AgentRole, CalibrationMode>> = _calibrationModes.asStateFlow()
+
+    fun setCalibrationMode(role: AgentRole, mode: CalibrationMode) {
+        if (_calibrationState.value.isRunning) return
+        _calibrationModes.value = _calibrationModes.value.toMutableMap().apply { put(role, mode) }
+    }
+    val calibrationDurations: StateFlow<Map<AgentRole, Int>> = _calibrationDurations.asStateFlow()
+
+    fun setCalibrationDuration(role: AgentRole, minutes: Int) {
+        if (_calibrationState.value.isRunning) return
+        _calibrationDurations.value = _calibrationDurations.value.toMutableMap().apply {
+            put(role, minutes.coerceIn(1, 120))
+        }
+    }
+
+    private val _calibrationState = MutableStateFlow(CalibrationUiState())
+    val calibrationState: StateFlow<CalibrationUiState> = _calibrationState.asStateFlow()
+    private var calibrationJob: Job? = null
+
+    fun startCalibration() {
+        if (_calibrationState.value.isRunning) return
+        calibrationJob?.cancel()
+        calibrationJob = viewModelScope.launch {
+            val roles = listOf(AgentRole.CODING, AgentRole.REASONING, AgentRole.VISION)
+            val cases = mapOf(
+                AgentRole.CODING to listOf(
+                    "Firmware ESP32: planeje um firmware C++ para ler um sensor, controlar uma saída e tratar falha de leitura. Inclua estados e critérios de teste.",
+                    "Menu funcional: crie a estrutura de um menu para OLED com opções, navegação por encoder e retorno. Explique como evitar bloqueios no loop principal.",
+                    "Configurações persistentes: implemente em Kotlin uma tela de opções que salva preferências, valida valores e restaura padrões.",
+                    "Depuração Kotlin: fun dividir(a: Int, b: Int): Int { return a / b }; println(dividir(10, 0)). Identifique e corrija a falha.",
+                    "Depuração Python: items = [1, 2, 3]; for i in range(len(items) + 1): print(items[i]). Corrija o limite e proponha um teste.",
+                    "API: projete uma rota HTTP que recebe configuração, valida os campos, responde com erros claros e não salva dados inválidos.",
+                    "Projeto modular: separe um aplicativo em interface, regras de negócio, armazenamento e acesso à rede. Mostre arquivos e responsabilidades.",
+                    "Linux: analise um serviço que falha ao iniciar. Liste comandos de leitura seguros para conferir status, logs, permissões e dependências; não alegue execução.",
+                    "Linux: receba um projeto de laboratório com scripts, unidades systemd e arquivos de configuração. Aponte falhas, proponha melhorias e escreva testes sem alterar o sistema real."
+                ),
+                AgentRole.REASONING to listOf(
+                    "Lógica: Ana é mais velha que Bia. Bia é mais velha que Caio. Diego é mais novo que Caio. Ordene as quatro pessoas e explique a dedução.",
+                    "Diagnóstico tecnológico: um celular fecha um modelo local ao abrir outro aplicativo. Analise RAM, memória livre, contexto do modelo e descarregamento; separe fatos de hipóteses.",
+                    "Hardware: explique como CPU, RAM, armazenamento e sistema operacional trabalham juntos ao abrir um modelo local de IA.",
+                    "Redes: um computador conecta ao Wi-Fi, mas não abre sites. Compare hipóteses envolvendo IP, DNS, gateway e conexão externa.",
+                    "Sistemas: compare duas arquiteturas para um app móvel com três modelos de IA e pouca RAM. Considere execução sequencial, tempo e custo de recarga.",
+                    "Investigação: receba três relatos que se contradizem sobre uma falha. Liste o que está confirmado, o que falta medir e qual teste distingue as hipóteses.",
+                    "Planejamento: divida a criação de um firmware ESP32 com menu, configurações salvas e comunicação Wi-Fi em tarefas, dependências e critérios de aceite.",
+                    "Colaboração: revise uma resposta da Coding AI que afirma ter compilado um projeto sem mostrar logs. Identifique o que pode e o que não pode ser confirmado.",
+                    "Conhecimento tecnológico: explique a diferença entre processo, serviço, thread, memória virtual e armazenamento, usando exemplos simples."
+                ),
+                AgentRole.VISION to listOf(
+                    "MAPA DE INTERFACE: identifique no máximo cinco componentes importantes, diga em que região estão e explique como se agrupam. Não descreva o fundo inteiro.",
+                    "LEITURA DE TEXTO: transcreva somente os rótulos realmente legíveis. Marque texto incerto como [ilegível]; não complete palavras por contexto.",
+                    "GEOMETRIA: compare alinhamento, largura relativa, espaçamento e posição de cartões e painéis. Use relações como maior/menor e esquerda/direita, sem inventar pixels.",
+                    "ESTADO VISUAL: localize controles selecionados, desativados, alertas e indicadores de carregamento. Para cada estado, cite a evidência visual.",
+                    "AUDITORIA DE UI: encontre até três inconsistências de cor, tipografia, borda, alinhamento ou espaçamento. Se não houver evidência, diga que não encontrou.",
+                    "ESPECIFICAÇÃO PARA CODING AI: transforme a tela em uma lista curta de componentes, posição relativa, estilo aproximado e comportamento que a imagem comprova.",
+                    "CONTAGEM E LOCALIZAÇÃO: conte apenas os cartões, botões ou painéis que conseguir distinguir. Informe quando algum elemento estiver parcialmente oculto.",
+                    "COMPARAÇÃO: compare duas áreas da imagem e indique uma semelhança e uma diferença concreta, sem repetir a descrição geral.",
+                    "DIAGNÓSTICO VISUAL: aponte o problema visual mais importante, a evidência e uma correção específica. Não suponha falhas de funcionamento.",
+                    "RESUMO COM EVIDÊNCIAS: responda à pergunta principal em até cinco tópicos; cada tópico deve conter uma observação visível, não uma suposição."
+                )
+            )
+            val selectedDurations = _calibrationDurations.value
+            val selectedModes = _calibrationModes.value
+            val sacePrefs = getApplication<Application>().getSharedPreferences("sace_progress", 0)
+            val sessionNumber = sacePrefs.getInt("session_count", 0) + 1
+            sacePrefs.edit().putInt("session_count", sessionNumber).apply()
+            val isSurpriseSession = sessionNumber % 5 == 0
+            val report = StringBuilder("SACE — sessão #$sessionNumber")
+            var completed = 0
+            val hasUltimate = selectedModes.values.any { it == CalibrationMode.ULTIMATE }
+            val total = if (hasUltimate) 0 else roles.sumOf { role ->
+                val mode = selectedModes[role] ?: CalibrationMode.NORMAL
+                when (mode) {
+                    CalibrationMode.NORMAL -> 3
+                    CalibrationMode.ADVANCED -> 6
+                    CalibrationMode.ULTIMATE -> 0
+                }
+            } + if (isSurpriseSession) roles.size else 0
+            _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
+            InferenceTaskForegroundService.startTask(getApplication())
+            try {
+                for (role in roles) {
+                    val mode = selectedModes[role] ?: CalibrationMode.NORMAL
+                    val durationMinutes = if (mode == CalibrationMode.ULTIMATE) 300 else selectedDurations.getValue(role)
+                    val roleDeadline = System.currentTimeMillis() + durationMinutes * 60_000L
+                    report.append("\n\n").append(role.displayName).append(" — ").append(mode.title)
+                        .append(": limite de ").append(durationMinutes).append(" min.")
+                    _calibrationState.value = _calibrationState.value.copy(
+                        currentRole = role, currentCase = "Preparando " + role.displayName
+                    )
+                    val roleNotes = StringBuilder()
+                    val pool = cases.getValue(role)
+                    val selectedPool = when (mode) {
+                        CalibrationMode.NORMAL -> pool.take(3)
+                        CalibrationMode.ADVANCED -> pool.take(6)
+                        CalibrationMode.ULTIMATE -> pool
+                    }
+                    val initialOffset = sacePrefs.getInt("next_${role.id}", 0).coerceAtLeast(0)
+                    val roleStartedAt = System.currentTimeMillis()
+                    var attempt = 0
+                    do {
+                        if (System.currentTimeMillis() >= roleDeadline) break
+                        val cycle = attempt / selectedPool.size
+                        val basePrompt = selectedPool[(initialOffset + attempt) % selectedPool.size]
+                        val isLinuxFinalHour = role == AgentRole.CODING &&
+                            mode == CalibrationMode.ULTIMATE &&
+                            System.currentTimeMillis() - roleStartedAt >= 4 * 60 * 60 * 1000L
+                        val ultimateHour = ((System.currentTimeMillis() - roleStartedAt) / 3_600_000L).toInt().coerceIn(0, 4)
+                        val reasoningStage = listOf(
+                            "ETAPA 1/5 — lógica, dedução, padrões e hipóteses.",
+                            "ETAPA 2/5 — tecnologia: hardware, CPU, RAM, redes e sistemas operacionais.",
+                            "ETAPA 3/5 — investigação de falhas e análise de sistemas.",
+                            "ETAPA 4/5 — colaboração: dividir tarefas e revisar resultados da Coding AI e Vision AI sem concordar automaticamente.",
+                            "ETAPA 5/5 — desafio final: analisar um projeto complexo, apontar incertezas e montar um plano verificável."
+                        )
+                        val visionStage = listOf(
+                            "ETAPA 1/5 — reconhecer elementos e componentes que estejam realmente visíveis.",
+                            "ETAPA 2/5 — analisar interfaces, hierarquia e organização.",
+                            "ETAPA 3/5 — leitura de texto legível e relações espaciais; não adivinhe conteúdo ilegível.",
+                            "ETAPA 4/5 — comparar regiões e identificar erros visuais.",
+                            "ETAPA 5/5 — desafio final: produzir uma especificação visual clara para a Coding AI."
+                        )
+                        val stagePrefix = when {
+                            mode != CalibrationMode.ULTIMATE -> ""
+                            role == AgentRole.REASONING -> reasoningStage[ultimateHour] + " "
+                            role == AgentRole.VISION -> visionStage[ultimateHour] + " "
+                            else -> ""
+                        }
+                        val prompt = if (isLinuxFinalHour) {
+                            "DESAFIO FINAL LINUX: use somente o projeto de laboratório e os arquivos que forem fornecidos nesta tarefa. " +
+                                "Mapeie a estrutura, analise scripts, serviços, permissões e dependências; encontre erros; proponha melhorias; " +
+                                "reescreva apenas módulos selecionados e crie testes. Não afirme que analisou uma distribuição inteira nem que executou comandos. " +
+                                "Tarefa: " + basePrompt
+                        } else if (cycle == 0) stagePrefix + basePrompt else {
+                            stagePrefix + basePrompt + "\n\nCrie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
+                        }
+                        _calibrationState.value = _calibrationState.value.copy(
+                            currentCase = role.displayName + " (" + mode.title + "): exercício " + (attempt + 1) +
+                                if (mode == CalibrationMode.ULTIMATE) " — ciclo " + (cycle + 1) else "",
+                            latestOutput = "", error = null
+                        )
+                        val turns = listOf(ChatTurn(
+                            role = "user", text = prompt,
+                            imagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
+                        ))
+                        var output = ""
+                        var failure: String? = null
+                        val stream = when (role) {
+                            AgentRole.VISION -> container.visionAgent.streamExecute(turns, "CALIBRATION", maxTokensOverride = 240)
+                            AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "CALIBRATION", maxTokensOverride = 320)
+                            AgentRole.CODING -> container.codingAgent.streamExecute(turns, "CALIBRATION", maxTokensOverride = 512)
+                        }
+                        stream.collect { event ->
+                            when (event) {
+                                is InferenceStreamEvent.Token -> output += event.text
+                                is InferenceStreamEvent.Completed -> output = event.fullText.ifBlank { output }
+                                is InferenceStreamEvent.Failed -> failure = event.errorMessage
+                                else -> Unit
+                            }
+                            _calibrationState.value = _calibrationState.value.copy(
+                                latestOutput = output.takeLast(3500), error = failure
+                            )
+                        }
+                        if (failure != null || output.isBlank()) {
+                            report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
+                            if (mode != CalibrationMode.ULTIMATE) break
+                        } else {
+                            roleNotes.append("\n[Exemplo ").append(attempt + 1).append("] ")
+                                .append(prompt.take(180)).append("\n[Resposta] ")
+                                .append(output.take(360)).append("\n")
+                            report.append("\n• ").append(role.displayName).append(" — exercício ")
+                                .append(attempt + 1).append(": concluído.")
+                        }
+                        completed++
+                        attempt++
+                        sacePrefs.edit().putInt("next_${role.id}", (initialOffset + attempt) % selectedPool.size).apply()
+                        _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
+                        if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
+                    } while (
+                        (mode == CalibrationMode.ULTIMATE && System.currentTimeMillis() < roleDeadline) ||
+                        (mode != CalibrationMode.ULTIMATE && attempt < selectedPool.size)
+                    )
+                    report.append("\n• ").append(role.displayName).append(": ")
+                        .append(attempt).append(" tentativas nesta sessão.")
+
+                    if (roleNotes.isNotBlank()) {
+                        val dao = container.database.agentConfigDao()
+                        val cfg = dao.getByRole(role.id) ?: AgentConfigEntity(roleId = role.id)
+                        val prior = cfg.systemPromptOverride.orEmpty().substringBefore("\n\n[AI CALIBRATION EXAMPLES]")
+                        val block = roleNotes.toString().take(1250)
+                        val updated = (prior + "\n\n[AI CALIBRATION EXAMPLES]\nUse os exemplos anteriores como referências, sem copiar respostas cegamente; priorize correção e evidências na tarefa atual.\n" + block).trim()
+                        dao.upsert(cfg.copy(systemPromptOverride = updated.take(5000)))
+                    }
+                }
+                if (isSurpriseSession) {
+                    report.append("\n\nTESTE SURPRESA — sessão múltipla de 5")
+                    val surprisePrompts = mapOf(
+                        AgentRole.CODING to "Desafio inédito: crie uma máquina de estados simples para um firmware ESP32 que controla um menu, salva uma configuração e lida com falha de sensor. Defina testes de aceitação.",
+                        AgentRole.REASONING to "Desafio inédito: dois relatos sobre um computador discordam sobre quando a falha começou. Monte hipóteses, diga quais dados faltam e escolha o teste mais útil sem tratar suposições como fatos.",
+                        AgentRole.VISION to "Analise a captura fornecida e transforme a organização visual em uma descrição curta de componentes, agrupamentos e alinhamentos. Informe claramente o que a imagem não permite confirmar."
+                    )
+                    for (role in roles) {
+                        _calibrationState.value = _calibrationState.value.copy(
+                            currentRole = role,
+                            currentCase = role.displayName + ": teste surpresa sem exemplos prévios",
+                            latestOutput = "",
+                            error = null
+                        )
+                        val turns = listOf(ChatTurn(
+                            role = "user",
+                            text = surprisePrompts.getValue(role),
+                            imagePath = if (role == AgentRole.VISION) createCalibrationImage(sessionNumber + 100) else null
+                        ))
+                        var output = ""
+                        var failure: String? = null
+                        val stream = when (role) {
+                            AgentRole.VISION -> container.visionAgent.streamExecute(turns, "SACE_SURPRISE", maxTokensOverride = 220)
+                            AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "SACE_SURPRISE", maxTokensOverride = 280)
+                            AgentRole.CODING -> container.codingAgent.streamExecute(turns, "SACE_SURPRISE", maxTokensOverride = 400)
+                        }
+                        stream.collect { event ->
+                            when (event) {
+                                is InferenceStreamEvent.Token -> output += event.text
+                                is InferenceStreamEvent.Completed -> output = event.fullText.ifBlank { output }
+                                is InferenceStreamEvent.Failed -> failure = event.errorMessage
+                                else -> Unit
+                            }
+                            _calibrationState.value = _calibrationState.value.copy(
+                                latestOutput = output.takeLast(2500), error = failure
+                            )
+                        }
+                        sacePrefs.edit()
+                            .putString("surprise_${role.id}", output.take(600))
+                            .putLong("surprise_time_${role.id}", System.currentTimeMillis())
+                            .apply()
+                        report.append("\n• ").append(role.displayName)
+                            .append(if (failure == null && output.isNotBlank()) ": resposta registrada para avaliação." else ": teste não concluído — " + failure)
+                        completed++
+                        _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
+                    }
+                }
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false, currentRole = null, currentCase = "Calibração concluída",
+                    report = "Sessão concluída. Respostas concluídas foram registradas como exemplos nos prompts especializados.\n" + report
+                )
+                _uiBannerMessage.value = "AI Calibration Lab: sessão concluída. Perfis de referência atualizados."
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                _calibrationState.value = _calibrationState.value.copy(isRunning = false, currentCase = "Sessão interrompida")
+                throw cancelled
+            } catch (error: Exception) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false, error = error.message ?: "Falha inesperada na calibração."
+                )
+            } finally {
+                container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração")
+                InferenceTaskForegroundService.finishTask(getApplication())
+            }
+        }
+    }
+
+    fun stopCalibration() {
+        calibrationJob?.cancel()
+        calibrationJob = null
+        viewModelScope.launch {
+            container.inferenceRuntimeManager.unloadAllModels("Calibração interrompida pelo usuário")
+        }
+        _calibrationState.value = _calibrationState.value.copy(isRunning = false, currentCase = "Sessão interrompida")
+    }
+
+    private fun createCalibrationImage(variant: Int = 0): String {
+        val safeVariant = ((variant % 6) + 6) % 6
+        val file = File(getApplication<Application>().cacheDir, "calibration_ui_sample_$safeVariant.png")
+        if (file.exists() && file.length() > 0) return file.absolutePath
+        val bitmap = Bitmap.createBitmap(640, 360, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val pageTitles = listOf("Workspace", "Device monitor", "Project files", "Network status", "Preferences", "Task manager")
+        val navItems = listOf("Dashboard", "Devices", "Files", "Network", "Settings", "Tasks")
+        val cardTitles = listOf("System overview", "Device health", "Recent files", "Connection", "Display options", "Active tasks")
+        val statusLines = listOf("3 agents online • 2 tasks", "CPU normal • RAM 68%", "12 files • 3 folders", "Wi-Fi connected • DNS ready", "Dark theme • Scale 100%", "2 running • 1 queued")
+        val active = safeVariant % 3
+        canvas.drawColor(Color.rgb(24, 28, 38))
+        paint.color = Color.rgb(37, 43, 57); canvas.drawRoundRect(18f, 18f, 622f, 342f, 18f, 18f, paint)
+        paint.color = Color.rgb(54, 62, 80); canvas.drawRoundRect(18f, 18f, 622f, 66f, 18f, 18f, paint)
+        paint.color = Color.WHITE; paint.textSize = 18f; canvas.drawText("NEBULA • " + pageTitles[safeVariant], 42f, 48f, paint)
+        paint.color = Color.rgb(47, 55, 72); canvas.drawRoundRect(32f, 82f, 174f, 326f, 12f, 12f, paint)
+        paint.color = Color.rgb(110, 170, 245); canvas.drawRoundRect(46f, (102 + active * 42).toFloat(), 160f, (136 + active * 42).toFloat(), 8f, 8f, paint)
+        paint.color = Color.LTGRAY; paint.textSize = 13f
+        val navLabels = mutableListOf("Dashboard", "Projects", "Settings")
+        navLabels[active] = navItems[safeVariant]
+        navLabels.forEachIndexed { index, label ->
+            canvas.drawText(label, 52f, (124 + index * 42).toFloat(), paint)
+        }
+        paint.color = Color.rgb(62, 73, 94); canvas.drawRoundRect(192f, 84f, 606f, 326f, 14f, 14f, paint)
+        paint.color = Color.WHITE; paint.textSize = 21f; canvas.drawText("Welcome back", 218f, 124f, paint)
+        paint.color = Color.rgb(93, 161, 226); canvas.drawRoundRect(218f, 150f, 568f, 224f, 12f, 12f, paint)
+        paint.color = Color.WHITE; paint.textSize = 16f; canvas.drawText(cardTitles[safeVariant], 238f, 180f, paint)
+        paint.color = Color.rgb(180, 195, 220); paint.textSize = 13f; canvas.drawText(statusLines[safeVariant], 238f, 204f, paint)
+        paint.color = Color.rgb(82, 96, 120); canvas.drawRoundRect(218f, 242f, 380f, 302f, 10f, 10f, paint)
+        canvas.drawRoundRect(396f, 242f, 568f, 302f, 10f, 10f, paint)
+        if (safeVariant % 2 == 1) {
+            paint.color = Color.rgb(235, 170, 90)
+            canvas.drawCircle(548f, 104f, 7f, paint)
+        }
+        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        return file.absolutePath
     }
 
     // --- Multi-Agent Orchestrator ---

@@ -21,6 +21,41 @@ import org.nehuatl.llamacpp.LlamaHelper
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
+// Inspect only a bounded suffix: rescanning the full generated answer for every
+// token makes streaming inference quadratic as the response grows.
+private fun repeatedTailStart(text: CharSequence): Int {
+    val windowStart = (text.length - 1024).coerceAtLeast(0)
+    val tail = text.subSequence(windowStart, text.length)
+    val matches = Regex("[\\p{L}\\p{N}']+").findAll(tail).toList()
+    if (matches.size < 5) return -1
+
+    for (size in 8 downTo 2) {
+        val repetitions = 3
+        if (matches.size < size * repetitions) continue
+        val first = matches.size - size * repetitions
+        var same = true
+        for (repeat in 1 until repetitions) {
+            for (offset in 0 until size) {
+                if (!matches[first + offset].value.equals(
+                        matches[first + repeat * size + offset].value,
+                        ignoreCase = true
+                    )) {
+                    same = false
+                    break
+                }
+            }
+            if (!same) break
+        }
+        if (same) return windowStart + matches[first + size].range.first
+    }
+
+    val last = matches.takeLast(5)
+    if (last.all { it.value.equals(last.first().value, ignoreCase = true) }) {
+        return windowStart + matches[matches.size - 4].range.first
+    }
+    return -1
+}
+
 class LlamaCppRuntime(
     private val context: Context
 ) : LocalInferenceRuntime {
@@ -167,7 +202,23 @@ class LlamaCppRuntime(
                     is LlamaHelper.LLMEvent.Ongoing -> {
                         tokenCount = ev.tokenCount.coerceAtLeast(tokenCount + 1)
                         accumulated.append(ev.word)
-                        trySend(InferenceStreamEvent.Token(ev.word))
+                        val loopStart = repeatedTailStart(accumulated)
+                        if (loopStart >= 0 && finished.compareAndSet(false, true)) {
+                            // Preserve the first occurrence and stop pathological generation loops.
+                            accumulated.setLength(loopStart)
+                            runCatching { helper.stopPrediction() }
+                            val dur = System.currentTimeMillis() - startedAt
+                            trySend(
+                                InferenceStreamEvent.Completed(
+                                    fullText = accumulated.toString().trim(),
+                                    durationMs = dur,
+                                    approxTokens = tokenCount
+                                )
+                            )
+                            close()
+                        } else if (!finished.get()) {
+                            trySend(InferenceStreamEvent.Token(ev.word))
+                        }
                         if (tokenCount >= maxTokensLimit && finished.compareAndSet(false, true)) {
                             runCatching { helper.stopPrediction() }
                             val dur = System.currentTimeMillis() - startedAt

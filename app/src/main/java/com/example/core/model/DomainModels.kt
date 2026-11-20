@@ -72,7 +72,7 @@ enum class AgentRuntimeState {
 
 @Serializable
 data class InferenceParameters(
-    val contextLength: Int = 4096,
+    val contextLength: Int = 2048,
     val maxTokens: Int = 1024,
     val temperature: Float = 0.3f,
     val topP: Float = 0.92f,

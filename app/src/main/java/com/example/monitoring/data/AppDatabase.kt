@@ -34,7 +34,7 @@ data class AgentConfigEntity(
     val enabled: Boolean = true,
     val assignedModelId: String? = null,
     val runtimeBackend: String = "LLAMA_CPP",
-    val contextLength: Int = 4096,
+    val contextLength: Int = 2048,
     val maxTokens: Int = 1024,
     val temperature: Float = 0.25f,
     val topP: Float = 0.92f,

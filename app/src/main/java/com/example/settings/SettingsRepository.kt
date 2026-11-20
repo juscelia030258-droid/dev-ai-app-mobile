@@ -7,9 +7,12 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.extensions.ExtensionIds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "local_dev_ai_settings")
 
@@ -25,7 +28,8 @@ data class AppSettings(
     val thermalGuardEnabled: Boolean = true,
     val defaultMaxTokens: Int = 1024,
     val darkThemeEnabled: Boolean = true,
-    val autoStartServerOnLaunch: Boolean = false
+    val autoStartServerOnLaunch: Boolean = false,
+    val enabledExtensions: Set<String> = ExtensionIds.ALL
 )
 
 class SettingsRepository(private val context: Context) {
@@ -43,6 +47,7 @@ class SettingsRepository(private val context: Context) {
         val DEFAULT_MAX_TOKENS = intPreferencesKey("default_max_tokens")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val AUTO_START_SERVER = booleanPreferencesKey("auto_start_server")
+        val SMART_CONTEXT_MEMORY = stringPreferencesKey("smart_context_memory_v1")
     }
 
     val settingsFlow: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
@@ -58,8 +63,21 @@ class SettingsRepository(private val context: Context) {
             thermalGuardEnabled = prefs[Keys.THERMAL_GUARD_ENABLED] ?: true,
             defaultMaxTokens = (prefs[Keys.DEFAULT_MAX_TOKENS] ?: 1024).coerceIn(256, 4096),
             darkThemeEnabled = prefs[Keys.DARK_THEME] ?: true,
-            autoStartServerOnLaunch = prefs[Keys.AUTO_START_SERVER] ?: false
+            autoStartServerOnLaunch = prefs[Keys.AUTO_START_SERVER] ?: false,
+            enabledExtensions = ExtensionIds.ALL.filterTo(mutableSetOf()) { id -> prefs[stringPreferencesKey("extension_" + id)] != "disabled" }
         )
+    }
+
+    suspend fun getSmartContextMemory(): String = context.settingsDataStore.data
+        .map { it[Keys.SMART_CONTEXT_MEMORY].orEmpty() }
+        .first()
+
+    suspend fun saveSmartContextMemory(memory: String) {
+        context.settingsDataStore.edit { it[Keys.SMART_CONTEXT_MEMORY] = memory.take(7000) }
+    }
+
+    suspend fun clearSmartContextMemory() {
+        context.settingsDataStore.edit { it.remove(Keys.SMART_CONTEXT_MEMORY) }
     }
 
     suspend fun updateServerPort(port: Int) {
@@ -108,6 +126,11 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun updateAutoStartServer(enabled: Boolean) {
         context.settingsDataStore.edit { it[Keys.AUTO_START_SERVER] = enabled }
+    }
+
+    suspend fun updateExtensionEnabled(id: String, enabled: Boolean) {
+        require(id in ExtensionIds.ALL) { "Extensão desconhecida." }
+        context.settingsDataStore.edit { it[stringPreferencesKey("extension_" + id)] = if (enabled) "enabled" else "disabled" }
     }
 
     suspend fun resetToDefaults() {
