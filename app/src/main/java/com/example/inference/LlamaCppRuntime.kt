@@ -21,10 +21,14 @@ import org.nehuatl.llamacpp.LlamaHelper
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-// Detect consecutive repeated token sequences only at the very end of a response.
-private fun repeatedTailStart(text: String): Int {
-    val matches = Regex("[\\p{L}\\p{N}']+").findAll(text).toList()
+// Inspect only a bounded suffix: rescanning the full generated answer for every
+// token makes streaming inference quadratic as the response grows.
+private fun repeatedTailStart(text: CharSequence): Int {
+    val windowStart = (text.length - 1024).coerceAtLeast(0)
+    val tail = text.subSequence(windowStart, text.length)
+    val matches = Regex("[\\p{L}\\p{N}']+").findAll(tail).toList()
     if (matches.size < 5) return -1
+
     for (size in 8 downTo 2) {
         val repetitions = 3
         if (matches.size < size * repetitions) continue
@@ -42,11 +46,12 @@ private fun repeatedTailStart(text: String): Int {
             }
             if (!same) break
         }
-        if (same) return matches[first + size].range.first
+        if (same) return windowStart + matches[first + size].range.first
     }
+
     val last = matches.takeLast(5)
     if (last.all { it.value.equals(last.first().value, ignoreCase = true) }) {
-        return matches[matches.size - 4].range.first
+        return windowStart + matches[matches.size - 4].range.first
     }
     return -1
 }
@@ -197,7 +202,7 @@ class LlamaCppRuntime(
                     is LlamaHelper.LLMEvent.Ongoing -> {
                         tokenCount = ev.tokenCount.coerceAtLeast(tokenCount + 1)
                         accumulated.append(ev.word)
-                        val loopStart = repeatedTailStart(accumulated.toString())
+                        val loopStart = repeatedTailStart(accumulated)
                         if (loopStart >= 0 && finished.compareAndSet(false, true)) {
                             // Preserve the first occurrence and stop pathological generation loops.
                             accumulated.setLength(loopStart)
