@@ -45,7 +45,7 @@ class SaceBenchmarkStore(context: Context) {
             .put("caseId", result.caseId).put("roleId", result.roleId).put("skill", result.skill)
             .put("completed", result.completed).put("score", result.score ?: -1)
             .put("confidence", result.confidence ?: -1).put("feedback", result.feedback.take(240))
-            .put("outputPreview", result.outputPreview.take(400)).put("timestamp", result.timestamp))
+            .put("outputPreview", result.outputPreview.take(400)).put("timestamp", result.timestamp).put("runId", result.runId))
         while (items.length() > MAX_RESULTS) items.remove(0)
         prefs.edit().putString(KEY_RESULTS, items.toString()).commit()
     }
@@ -59,29 +59,42 @@ class SaceBenchmarkStore(context: Context) {
             SaceBenchmarkResult(
                 item.optString("caseId"), item.optString("roleId"), item.optString("skill"),
                 item.optBoolean("completed"), score, confidence, item.optString("feedback"),
-                item.optString("outputPreview"), item.optLong("timestamp")
+                item.optString("outputPreview"), item.optLong("timestamp"), item.optLong("runId", item.optLong("timestamp"))
             )
         }
     }
 
+    fun beginRun(): Long = System.currentTimeMillis()
+
     fun summary(): String {
-        val latest = results().takeLast(SaceBenchmarkDataset.cases.size)
-        if (latest.isEmpty()) return "Nenhum benchmark executado ainda."
+        val all = results()
+        if (all.isEmpty()) return "Nenhum benchmark executado ainda."
+        val latestRunId = all.last().runId
+        val latest = all.filter { it.runId == latestRunId }
+        val previousRunId = all.lastOrNull { it.runId != latestRunId }?.runId
+        val previous = previousRunId?.let { id -> all.filter { it.runId == id } }.orEmpty()
+        val scored = latest.mapNotNull { it.score }
+        val average = scored.takeIf { it.isNotEmpty() }?.average()?.toInt()
+        val previousScores = previous.mapNotNull { it.score }
+        val previousAverage = previousScores.takeIf { it.isNotEmpty() }?.average()?.toInt()
         val lines = latest.map { result ->
             val label = result.roleId.replaceFirstChar { it.uppercase() }
             val grade = result.score?.let { it.toString() + "/100 (confiança " + (result.confidence ?: 0) + "%)" } ?: "sem nota"
             "• " + label + " — " + result.skill + ": " + if (result.completed) grade else "falha de inferência"
         }
-        val scored = latest.mapNotNull { it.score }
-        val average = scored.takeIf { it.isNotEmpty() }?.average()?.toInt()
         return buildString {
-            append("Benchmark v" + SaceBenchmarkDataset.VERSION + " — " + latest.size + "/" + SaceBenchmarkDataset.cases.size + " casos registrados.\n")
+            append("Benchmark v" + SaceBenchmarkDataset.VERSION + " — " + latest.size + "/" + SaceBenchmarkDataset.cases.size + " casos nesta execução.\n")
             append(lines.joinToString("\n"))
             if (average != null) append("\nMédia estimada: " + average + "/100 em " + scored.size + " respostas avaliadas.")
+            if (average != null && previousAverage != null) {
+                val delta = average - previousAverage
+                append("\nVariação contra a execução anterior: " + (if (delta > 0) "+" else "") + delta + " pontos (anterior " + previousAverage + "/100).")
+            } else {
+                append("\nExecute novamente após a calibração para obter uma comparação antes/depois.")
+            }
             append("\nAs notas são estimativas de segunda passada do próprio modelo, não uma avaliação independente.")
         }
     }
-
     companion object {
         private const val KEY_RESULTS = "results"
         private const val MAX_RESULTS = 90
