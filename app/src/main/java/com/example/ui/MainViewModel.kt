@@ -436,6 +436,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 
     // --- AI Calibration Lab ---
+    private val _calibrationDurations = MutableStateFlow(
+        mapOf(AgentRole.VISION to 20, AgentRole.REASONING to 45, AgentRole.CODING to 60)
+    )
+    val calibrationDurations: StateFlow<Map<AgentRole, Int>> = _calibrationDurations.asStateFlow()
+
+    fun setCalibrationDuration(role: AgentRole, minutes: Int) {
+        if (_calibrationState.value.isRunning) return
+        _calibrationDurations.value = _calibrationDurations.value.toMutableMap().apply {
+            put(role, minutes.coerceIn(1, 120))
+        }
+    }
+
     private val _calibrationState = MutableStateFlow(CalibrationUiState())
     val calibrationState: StateFlow<CalibrationUiState> = _calibrationState.asStateFlow()
     private var calibrationJob: Job? = null
@@ -462,6 +474,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "Ambiente de desenvolvimento: explique como identificar Windows/PowerShell, macOS/zsh ou Linux/bash antes de escolher comandos. Dê um exemplo seguro de inspeção para cada um e não alegue execução."
                 )
             )
+            val selectedDurations = _calibrationDurations.value
             val report = StringBuilder()
             var completed = 0
             val total = cases.values.sumOf { it.size }
@@ -469,11 +482,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val visionImage = createCalibrationImage()
                 for (role in roles) {
+                    val roleDeadline = System.currentTimeMillis() + selectedDurations.getValue(role) * 60_000L
+                    report.append("\n\n").append(role.displayName).append(": limite de ").append(selectedDurations.getValue(role)).append(" min.")
                     _calibrationState.value = _calibrationState.value.copy(
                         currentRole = role, currentCase = "Preparando " + role.displayName
                     )
                     val roleNotes = StringBuilder()
                     for ((index, prompt) in cases.getValue(role).withIndex()) {
+                        if (System.currentTimeMillis() >= roleDeadline) {
+                            report.append("\n• Tempo máximo atingido para ").append(role.displayName).append(".")
+                            break
+                        }
                         _calibrationState.value = _calibrationState.value.copy(
                             currentCase = role.displayName + ": exercício " + (index + 1) + "/3",
                             latestOutput = "", error = null
