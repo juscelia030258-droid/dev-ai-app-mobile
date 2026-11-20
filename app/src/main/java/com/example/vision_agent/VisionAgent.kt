@@ -32,7 +32,9 @@ class VisionAgent(
             - Não repita informações, frases ou descrições sem acrescentar algo novo.
             - IMPORTANTE: não proíba a reutilização de palavras. Reutilize nomes, termos técnicos e palavras sempre que forem necessários para clareza e coerência. Evite somente repetição de conteúdo.
             - Não narre continuamente a imagem nem reinicie a análise. Encerre quando os achados relevantes estiverem apresentados.
-            - Limite absoluto: no máximo 200 palavras por resposta. Em análises completas, procure ficar entre 80 e 200 palavras; perguntas simples podem ser respondidas com menos.
+            - Responda uma única vez. Não repita a conclusão, não reformule o mesmo ponto em frases seguidas e não faça listas duplicadas.
+            - Se a imagem tiver várias regiões, escolha apenas as regiões úteis para a pergunta. Não descreva cada pixel ou elemento decorativo.
+            - Limite absoluto: no máximo 160 palavras por resposta. Em análises completas, procure ficar entre 60 e 160 palavras; perguntas simples podem ser respondidas com menos.
             - Não invente elementos, textos, tecnologias ou propriedades que não estejam visíveis. Quando houver dúvida, indique o nível de confiança.
             - Diferencie observação direta, interpretação provável e informação que não pode ser confirmada pela imagem.
             - Só analise imagens realmente fornecidas. Não diga que navegou ou viu uma captura que não recebeu.
@@ -127,8 +129,6 @@ class VisionAgent(
         val startTime = System.currentTimeMillis()
         var lastError: String? = null
         var fullOutput = ""
-        var streamedOutput = ""
-        var emittedCharacters = 0
 
         runtimeManager.streamInference(
             role = AgentRole.VISION,
@@ -139,16 +139,14 @@ class VisionAgent(
             params = params
         ).collect { ev ->
             when (ev) {
-                is InferenceStreamEvent.Token -> {
-                    streamedOutput += ev.text
-                    val bounded = limitWords(streamedOutput, 200)
-                    if (bounded.length > emittedCharacters) {
-                        emit(InferenceStreamEvent.Token(bounded.substring(emittedCharacters)))
-                        emittedCharacters = bounded.length
-                    }
-                }
+                // Buffer vision tokens and publish one cleaned result at completion.
+                // This prevents a small VLM that restarts/repeats phrases from flooding the UI.
+                is InferenceStreamEvent.Token -> Unit
                 is InferenceStreamEvent.Completed -> {
-                    fullOutput = limitWords(ev.fullText, 200)
+                    fullOutput = cleanVisualAnswer(ev.fullText)
+                    if (fullOutput.isNotBlank()) {
+                        emit(InferenceStreamEvent.Token(fullOutput))
+                    }
                     emit(ev.copy(fullText = fullOutput))
                 }
                 is InferenceStreamEvent.Failed -> {
@@ -172,6 +170,26 @@ class VisionAgent(
                 errorMessage = lastError
             )
         )
+    }
+
+    private fun cleanVisualAnswer(raw: String): String {
+        val bounded = limitWords(raw.trim(), 160)
+        if (bounded.isBlank()) return ""
+        val seen = mutableSetOf<String>()
+        val unique = bounded
+            .split(Regex("(?<=[.!?])\\s+|\\n+"))
+            .map { it.trim() }
+            .filter { sentence ->
+                if (sentence.isBlank()) false
+                else {
+                    val key = sentence.lowercase()
+                        .replace(Regex("[^\\p{L}\\p{N} ]"), "")
+                        .replace(Regex("\\s+"), " ")
+                        .trim()
+                    key.isNotBlank() && seen.add(key)
+                }
+            }
+        return unique.joinToString(" ").take(1800).trim()
     }
 
     private fun limitWords(text: String, maxWords: Int): String {
