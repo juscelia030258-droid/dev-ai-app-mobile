@@ -37,6 +37,7 @@ import com.example.security.KeyPermission
 import com.example.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,6 +46,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -451,13 +453,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val calibrationModes: StateFlow<Map<AgentRole, CalibrationMode>> = _calibrationModes.asStateFlow()
 
     fun setCalibrationMode(role: AgentRole, mode: CalibrationMode) {
-        if (_calibrationState.value.isRunning) return
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
         _calibrationModes.value = _calibrationModes.value.toMutableMap().apply { put(role, mode) }
     }
     val calibrationDurations: StateFlow<Map<AgentRole, Int>> = _calibrationDurations.asStateFlow()
 
     fun setCalibrationDuration(role: AgentRole, minutes: Int) {
-        if (_calibrationState.value.isRunning) return
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
         _calibrationDurations.value = _calibrationDurations.value.toMutableMap().apply {
             put(role, minutes.coerceIn(1, 120))
         }
@@ -525,8 +527,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startCalibration(resume: Boolean = false) {
-        if (_calibrationState.value.isRunning) return
-        calibrationJob?.cancel()
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
+        if (calibrationJob?.isActive == true || benchmarkJob?.isActive == true) return
         pauseRequested = false
         calibrationJob = viewModelScope.launch {
             val savedCheckpoint = if (resume) saceProgressStore.readCheckpoint() else null
@@ -628,14 +630,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } + if (isSurpriseSession) roles.size else 0
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
-            InferenceTaskForegroundService.startTask(getApplication())
+            var taskStarted = false
             try {
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
                 val resumeRoleIndex = savedCheckpoint?.let { cp -> roles.indexOfFirst { it.id == cp.roleId }.coerceAtLeast(0) } ?: 0
                 for (role in roles.drop(resumeRoleIndex)) {
                     val isResumingThisRole = savedCheckpoint?.roleId == role.id
                     val mode = if (isResumingThisRole) runCatching { CalibrationMode.valueOf(savedCheckpoint!!.mode) }.getOrDefault(selectedModes[role] ?: CalibrationMode.NORMAL) else (selectedModes[role] ?: CalibrationMode.NORMAL)
                     val durationMinutes = if (mode == CalibrationMode.ULTIMATE) 300 else selectedDurations.getValue(role)
-                    val roleStartedAt = if (isResumingThisRole) savedCheckpoint!!.startedAt else System.currentTimeMillis()
+                    // Only active calibration time counts; time while the app is paused/offline is excluded.
+                    val roleStartedAt = if (isResumingThisRole) {
+                        System.currentTimeMillis() - savedCheckpoint!!.elapsedMs.coerceAtLeast(0L)
+                    } else {
+                        System.currentTimeMillis()
+                    }
                     val roleDeadline = roleStartedAt + durationMinutes * 60_000L
                     report.append("\n\n").append(role.displayName).append(" — ").append(mode.title)
                         .append(": limite de ").append(durationMinutes).append(" min.")
@@ -708,7 +717,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             roleId = role.id, mode = mode.name, nextAttempt = attempt,
                             startedAt = roleStartedAt, sessionNumber = sessionNumber,
                             selectedModes = selectedModes.mapKeys { it.key.id }.mapValues { it.value.name },
-                            selectedDurations = selectedDurations.mapKeys { it.key.id }
+                            selectedDurations = selectedDurations.mapKeys { it.key.id },
+                            elapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L)
                         )
                         awaitSafeSaceConditions()
                         if (pauseRequested) throw kotlinx.coroutines.CancellationException("Pausa solicitada pelo usuário")
@@ -762,7 +772,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             startedAt = roleStartedAt,
                             sessionNumber = sessionNumber,
                             selectedModes = selectedModes.mapKeys { it.key.id }.mapValues { it.value.name },
-                            selectedDurations = selectedDurations.mapKeys { it.key.id }
+                            selectedDurations = selectedDurations.mapKeys { it.key.id },
+                            elapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L)
                         )
                         if (failure != null || output.isBlank()) {
                             report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
@@ -878,8 +889,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     error = error.message ?: "Falha inesperada na calibração."
                 )
             } finally {
-                container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração")
-                InferenceTaskForegroundService.finishTask(getApplication())
+                withContext(NonCancellable) {
+                    runCatching { container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração") }
+                    if (taskStarted) runCatching { InferenceTaskForegroundService.finishTask(getApplication()) }
+                }
             }
         }
     }
@@ -891,7 +904,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun runSaceBenchmark() {
         if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
-        benchmarkJob?.cancel()
+        if (calibrationJob?.isActive == true || benchmarkJob?.isActive == true) return
         benchmarkJob = viewModelScope.launch {
             val cases = SaceBenchmarkDataset.cases
             val benchmarkRunId = saceBenchmarkStore.beginRun()
@@ -899,8 +912,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isBenchmarkRunning = true, benchmarkProgress = 0,
                 benchmarkReport = "", benchmarkError = null, thermalMessage = null
             )
-            InferenceTaskForegroundService.startTask(getApplication())
+            var taskStarted = false
             try {
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
                 cases.forEachIndexed { index, testCase ->
                     awaitSafeSaceConditions()
                     val role = when (testCase.roleId) {
@@ -942,8 +957,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         benchmarkReport = saceBenchmarkStore.summary()
                     )
                 }
+                saceBenchmarkStore.completeRun(benchmarkRunId)
                 _calibrationState.value = _calibrationState.value.copy(
-                    isBenchmarkRunning = false, benchmarkReport = saceBenchmarkStore.summary()
+                    isBenchmarkRunning = false, benchmarkReport = saceBenchmarkStore.summary(),
+                    benchmarkError = null, thermalMessage = null
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 _calibrationState.value = _calibrationState.value.copy(
@@ -953,11 +970,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Exception) {
                 _calibrationState.value = _calibrationState.value.copy(
                     isBenchmarkRunning = false,
+                    benchmarkReport = saceBenchmarkStore.summary(),
                     benchmarkError = error.message ?: "Falha ao executar benchmark."
                 )
             } finally {
-                container.inferenceRuntimeManager.unloadAllModels("Fim do SACE Benchmark")
-                InferenceTaskForegroundService.finishTask(getApplication())
+                withContext(NonCancellable) {
+                    runCatching { container.inferenceRuntimeManager.unloadAllModels("Fim do SACE Benchmark") }
+                    if (taskStarted) runCatching { InferenceTaskForegroundService.finishTask(getApplication()) }
+                }
             }
         }
     }
@@ -966,14 +986,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!_calibrationState.value.isRunning) return
         pauseRequested = true
         calibrationJob?.cancel()
-        calibrationJob = null
-        viewModelScope.launch {
-            container.inferenceRuntimeManager.unloadAllModels("SACE pausado pelo usuário")
-        }
+        // The cancelled job performs model/service cleanup in a NonCancellable finally block.
+        // Keeping its Job reference prevents a new session from racing that cleanup.
     }
 
     fun resumeCalibration() {
-        if (_calibrationState.value.isRunning || saceProgressStore.readCheckpoint() == null) return
+        if (_calibrationState.value.isRunning || calibrationJob?.isActive == true ||
+            benchmarkJob?.isActive == true || saceProgressStore.readCheckpoint() == null) return
         startCalibration(resume = true)
     }
 
