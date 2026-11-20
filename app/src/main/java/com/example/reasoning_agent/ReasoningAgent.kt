@@ -111,7 +111,10 @@ class ReasoningAgent(
         )
         val backend = runCatching { RuntimeBackend.valueOf(cfg.runtimeBackend) }
             .getOrDefault(RuntimeBackend.LLAMA_CPP)
-        val sysPrompt = cfg.systemPromptOverride?.takeIf { it.isNotBlank() } ?: DEFAULT_SYSTEM_PROMPT
+        val customPrompt = cfg.systemPromptOverride?.takeIf { it.isNotBlank() }
+        val sysPrompt = if (customPrompt == null) DEFAULT_SYSTEM_PROMPT
+            else if (customPrompt.contains("[AI CALIBRATION EXAMPLES]")) customPrompt + "\n\n" + DEFAULT_SYSTEM_PROMPT
+            else customPrompt
 
         val startTime = System.currentTimeMillis()
         var lastError: String? = null
