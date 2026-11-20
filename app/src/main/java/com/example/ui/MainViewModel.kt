@@ -466,6 +466,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val calibrationState: StateFlow<CalibrationUiState> = _calibrationState.asStateFlow()
     private var calibrationJob: Job? = null
 
+    private suspend fun evaluateCalibrationAnswer(role: AgentRole, exercise: String, answer: String): SaceEvaluation? {
+        val reviewPrompt = SaceAnswerEvaluator.buildPrompt(role.displayName, exercise, answer)
+        val reviewer = when (role) {
+            AgentRole.CODING -> container.codingAgent
+            AgentRole.REASONING -> container.reasoningAgent
+            AgentRole.VISION -> container.visionAgent
+        }
+        val review = reviewer.executeBlocking(
+            messages = listOf(ChatTurn("user", reviewPrompt)),
+            source = "SACE_SECOND_PASS_REVIEW",
+            temperatureOverride = 0.0f,
+            maxTokensOverride = 180
+        ).getOrNull()?.text ?: return null
+        return SaceAnswerEvaluator.parse(review)
+    }
+
     fun startCalibration() {
         if (_calibrationState.value.isRunning) return
         calibrationJob?.cancel()
@@ -652,6 +668,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         val attemptSucceeded = failure == null && output.isNotBlank()
+                        val evaluation = if (attemptSucceeded) {
+                            runCatching { evaluateCalibrationAnswer(role, prompt, output) }.getOrNull()
+                        } else null
                         val skillLabel = basePrompt.substringBefore(":").takeIf { it.length <= 80 } ?: "Geral"
                         saceProgressStore.recordAttempt(
                             roleId = role.id,
@@ -659,7 +678,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             skill = skillLabel,
                             completed = attemptSucceeded,
                             outputChars = output.length,
-                            error = failure ?: if (output.isBlank()) "Resposta vazia" else null
+                            error = failure ?: if (output.isBlank()) "Resposta vazia" else null,
+                            qualityScore = evaluation?.score,
+                            evaluationConfidence = evaluation?.confidence,
+                            evaluationFeedback = evaluation?.feedback
                         )
                         saceProgressStore.saveCheckpoint(
                             roleId = role.id,
@@ -672,11 +694,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
                             if (mode != CalibrationMode.ULTIMATE) break
                         } else {
-                            roleNotes.append("\n[Exemplo ").append(attempt + 1).append("] ")
-                                .append(prompt.take(180)).append("\n[Resposta] ")
-                                .append(output.take(360)).append("\n")
                             report.append("\n• ").append(role.displayName).append(" — exercício ")
-                                .append(attempt + 1).append(": concluído.")
+                                .append(attempt + 1).append(": inferência concluída")
+                            if (evaluation != null) {
+                                report.append(", avaliação estimada ").append(evaluation.score).append("/100")
+                                    .append(" (confiança ").append(evaluation.confidence).append("%): ")
+                                    .append(evaluation.feedback)
+                                if (evaluation.score >= 70 && evaluation.confidence >= 55) {
+                                    roleNotes.append("\n[Exemplo aprovado em segunda revisão — não é prova de correção] ")
+                                        .append(prompt.take(180)).append("\n[Resposta] ")
+                                        .append(output.take(360)).append("\n")
+                                }
+                            } else {
+                                report.append("; avaliação indisponível, sem nota")
+                            }
+                            report.append(".")
                         }
                         if (attemptSucceeded) completed++
                         attempt++
