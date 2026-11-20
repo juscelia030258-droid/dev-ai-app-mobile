@@ -13,7 +13,9 @@ data class SaceCheckpoint(
     val mode: String,
     val nextAttempt: Int,
     val startedAt: Long,
-    val sessionNumber: Int
+    val sessionNumber: Int,
+    val selectedModes: Map<String, String> = emptyMap(),
+    val selectedDurations: Map<String, Int> = emptyMap()
 )
 
 class SaceProgressStore(context: Context) {
@@ -122,15 +124,32 @@ class SaceProgressStore(context: Context) {
             if (skillText.isNotBlank()) " Áreas recentes: $skillText." else ""
     }
 
-    fun saveCheckpoint(roleId: String, mode: String, nextAttempt: Int, startedAt: Long, sessionNumber: Int) {
+    fun saveCheckpoint(
+        roleId: String,
+        mode: String,
+        nextAttempt: Int,
+        startedAt: Long,
+        sessionNumber: Int,
+        selectedModes: Map<String, String> = emptyMap(),
+        selectedDurations: Map<String, Int> = emptyMap()
+    ) {
+        val modesJson = JSONObject()
+        selectedModes.forEach { (role, value) -> modesJson.put(role, value) }
+        val durationsJson = JSONObject()
+        selectedDurations.forEach { (role, value) -> durationsJson.put(role, value.coerceIn(1, 300)) }
         val checkpoint = JSONObject()
             .put("role", roleId)
             .put("mode", mode)
             .put("nextAttempt", nextAttempt.coerceAtLeast(0))
             .put("startedAt", startedAt)
             .put("session", sessionNumber)
+            .put("selectedModes", modesJson)
+            .put("selectedDurations", durationsJson)
             .put("savedAt", System.currentTimeMillis())
-        prefs.edit().putString(KEY_CHECKPOINT, checkpoint.toString()).apply()
+        // This small checkpoint must reach disk before an expensive inference starts.
+        check(prefs.edit().putString(KEY_CHECKPOINT, checkpoint.toString()).commit()) {
+            "Não foi possível salvar o checkpoint do SACE."
+        }
     }
 
     fun readCheckpoint(): SaceCheckpoint? = synchronized(lock) {
@@ -143,12 +162,32 @@ class SaceProgressStore(context: Context) {
             mode = mode,
             nextAttempt = json.optInt("nextAttempt", 0).coerceAtLeast(0),
             startedAt = json.optLong("startedAt", System.currentTimeMillis()),
-            sessionNumber = json.optInt("session", 0).coerceAtLeast(0)
+            sessionNumber = json.optInt("session", 0).coerceAtLeast(0),
+            selectedModes = json.optJSONObject("selectedModes")?.let { modes ->
+                buildMap {
+                    modes.keys().forEach { key ->
+                        val value = modes.optString(key)
+                        if (key in setOf("coding", "reasoning", "vision") && value in CalibrationMode.entries.map { it.name }) {
+                            put(key, value)
+                        }
+                    }
+                }
+            }.orEmpty(),
+            selectedDurations = json.optJSONObject("selectedDurations")?.let { durations ->
+                buildMap {
+                    durations.keys().forEach { key ->
+                        if (key in setOf("coding", "reasoning", "vision")) {
+                            val value = durations.optInt(key, -1)
+                            if (value in 1..300) put(key, value)
+                        }
+                    }
+                }
+            }.orEmpty()
         )
     }
 
     fun clearCheckpoint() {
-        prefs.edit().remove(KEY_CHECKPOINT).apply()
+        check(prefs.edit().remove(KEY_CHECKPOINT).commit()) { "Não foi possível limpar o checkpoint do SACE." }
     }
 
     private fun readAttempts(): JSONArray =
