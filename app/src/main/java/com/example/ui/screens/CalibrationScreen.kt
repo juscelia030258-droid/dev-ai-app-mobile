@@ -37,9 +37,9 @@ fun CalibrationScreen(
     onStop: () -> Unit
 ) {
     val agents = listOf(
-        Triple(AgentRole.VISION, "Análise de interface, hierarquia visual, efeitos e comparação de sistemas.", 1..60),
-        Triple(AgentRole.REASONING, "Lógica, planejamento, verificação de premissas e casos-limite.", 1..90),
-        Triple(AgentRole.CODING, "Depuração, correção de bugs, sistemas operacionais e shells.", 1..120)
+        Triple(AgentRole.CODING, "Firmware, menus funcionais, configurações, Kotlin, Python, depuração e Linux no Ultimate.", 1..120),
+        Triple(AgentRole.REASONING, "Lógica, tecnologia, investigação, planejamento e colaboração entre agentes.", 1..90),
+        Triple(AgentRole.VISION, "Interfaces, leitura visual, relações espaciais e revisão de imagens.", 1..60)
     )
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -98,11 +98,16 @@ fun CalibrationScreen(
         }
         if (state.isRunning) {
             Text(state.currentCase, fontWeight = FontWeight.SemiBold)
-            LinearProgressIndicator(
-                progress = { if (state.totalCases == 0) 0f else state.completedCases.toFloat() / state.totalCases },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Text(state.completedCases.toString() + " / " + state.totalCases + " exercícios")
+            if (state.totalCases > 0) {
+                LinearProgressIndicator(
+                    progress = { (state.completedCases.toFloat() / state.totalCases).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(state.completedCases.toString() + " / " + state.totalCases + " exercícios")
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(state.completedCases.toString() + " exercícios concluídos — sessão Ultimate")
+            }
             if (state.latestOutput.isNotBlank()) {
                 Card(Modifier.fillMaxWidth()) {
                     Text(state.latestOutput, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
