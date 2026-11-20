@@ -528,7 +528,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startCalibration(resume: Boolean = false) {
         if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
-        if (calibrationJob?.isActive == true || benchmarkJob?.isActive == true) return
+        if (calibrationJob?.isCompleted == false || benchmarkJob?.isCompleted == false) return
         pauseRequested = false
         calibrationJob = viewModelScope.launch {
             val savedCheckpoint = if (resume) saceProgressStore.readCheckpoint() else null
@@ -904,7 +904,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun runSaceBenchmark() {
         if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
-        if (calibrationJob?.isActive == true || benchmarkJob?.isActive == true) return
+        if (calibrationJob?.isCompleted == false || benchmarkJob?.isCompleted == false) return
         benchmarkJob = viewModelScope.launch {
             val cases = SaceBenchmarkDataset.cases
             val benchmarkRunId = saceBenchmarkStore.beginRun()
@@ -991,8 +991,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resumeCalibration() {
-        if (_calibrationState.value.isRunning || calibrationJob?.isActive == true ||
-            benchmarkJob?.isActive == true || saceProgressStore.readCheckpoint() == null) return
+        if (_calibrationState.value.isRunning || calibrationJob?.isCompleted == false ||
+            benchmarkJob?.isCompleted == false || saceProgressStore.readCheckpoint() == null) return
         startCalibration(resume = true)
     }
 
