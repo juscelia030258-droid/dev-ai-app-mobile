@@ -1,0 +1,89 @@
+package com.example.ui
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** Fixed evaluation set; its prompts and scores never enter calibration examples or adaptive history. */
+data class SaceBenchmarkCase(val id: String, val roleId: String, val skill: String, val prompt: String)
+data class SaceBenchmarkResult(
+    val caseId: String, val roleId: String, val skill: String, val completed: Boolean,
+    val score: Int?, val confidence: Int?, val feedback: String, val outputPreview: String, val timestamp: Long
+)
+
+object SaceBenchmarkDataset {
+    const val VERSION = 1
+    val cases = listOf(
+        SaceBenchmarkCase("coding-debug-01", "coding", "Depuração",
+            "Analise: fun media(a: Int, b: Int): Int = (a + b) / 2. O código pode falhar ou produzir resultado incorreto? Explique os limites de Int, proponha uma versão segura e escreva três testes de borda. Não afirme que executou os testes."),
+        SaceBenchmarkCase("coding-design-01", "coding", "Arquitetura",
+            "Projete uma máquina de estados para um ESP32 que lê um sensor, atualiza um OLED e salva uma configuração. Inclua estados, transições, tratamento de leitura inválida e critérios de teste. Evite bloquear o loop."),
+        SaceBenchmarkCase("coding-terminal-01", "coding", "Terminal e segurança",
+            "Um projeto Kotlin não compila e o erro aponta para uma dependência Gradle. Liste uma sequência de comandos somente de leitura para investigar o problema em Windows PowerShell e macOS/Linux. Explique o que cada comando confirma e não invente resultados."),
+        SaceBenchmarkCase("reasoning-logic-01", "reasoning", "Dedução",
+            "Quatro tarefas A, B, C e D precisam ser executadas. A vem antes de C; B vem antes de C; C vem antes de D. Quais ordens são válidas? Explique o que é obrigatório e o que pode variar."),
+        SaceBenchmarkCase("reasoning-diagnosis-01", "reasoning", "Diagnóstico",
+            "Um app Android fecha quando abre um segundo modelo local. Você sabe apenas que o celular tem 4 GB de RAM e que o primeiro modelo estava carregado. Separe fatos de hipóteses e proponha as três medições mais úteis antes de mudar o código."),
+        SaceBenchmarkCase("reasoning-tradeoff-01", "reasoning", "Decisão técnica",
+            "Compare executar três modelos de IA em sequência ou em paralelo num celular com pouca RAM. Escolha uma opção para um app com Coding, Reasoning e Vision AI e explique custos, riscos e quando sua escolha deixaria de ser adequada."),
+        SaceBenchmarkCase("vision-evidence-01", "vision", "Evidência visual",
+            "Analise a imagem anexada. Identifique no máximo cinco elementos de interface, suas posições relativas e uma relação de alinhamento. Separe observações visíveis de suposições e não invente texto ilegível."),
+        SaceBenchmarkCase("vision-audit-01", "vision", "Auditoria visual",
+            "Analise a imagem anexada e encontre até três problemas visuais verificáveis. Para cada um, informe região, evidência e uma correção possível. Se não houver problema claro, diga isso sem inventar."),
+        SaceBenchmarkCase("vision-spec-01", "vision", "Especificação",
+            "Transforme a imagem anexada numa especificação curta para a Coding AI: componentes, agrupamentos, hierarquia e estados visíveis. Não deduza comportamento que a imagem não comprova.")
+    )
+    fun casesFor(roleId: String): List<SaceBenchmarkCase> = cases.filter { it.roleId == roleId }
+}
+
+class SaceBenchmarkStore(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences("sace_benchmark_v1", Context.MODE_PRIVATE)
+
+    fun record(result: SaceBenchmarkResult) {
+        val items = runCatching { JSONArray(prefs.getString(KEY_RESULTS, "[]")) }.getOrDefault(JSONArray())
+        items.put(JSONObject()
+            .put("caseId", result.caseId).put("roleId", result.roleId).put("skill", result.skill)
+            .put("completed", result.completed).put("score", result.score ?: -1)
+            .put("confidence", result.confidence ?: -1).put("feedback", result.feedback.take(240))
+            .put("outputPreview", result.outputPreview.take(400)).put("timestamp", result.timestamp))
+        while (items.length() > MAX_RESULTS) items.remove(0)
+        prefs.edit().putString(KEY_RESULTS, items.toString()).commit()
+    }
+
+    fun results(): List<SaceBenchmarkResult> {
+        val items = runCatching { JSONArray(prefs.getString(KEY_RESULTS, "[]")) }.getOrDefault(JSONArray())
+        return (0 until items.length()).mapNotNull { index ->
+            val item = items.optJSONObject(index) ?: return@mapNotNull null
+            val score = item.optInt("score", -1).takeIf { it in 0..100 }
+            val confidence = item.optInt("confidence", -1).takeIf { it in 0..100 }
+            SaceBenchmarkResult(
+                item.optString("caseId"), item.optString("roleId"), item.optString("skill"),
+                item.optBoolean("completed"), score, confidence, item.optString("feedback"),
+                item.optString("outputPreview"), item.optLong("timestamp")
+            )
+        }
+    }
+
+    fun summary(): String {
+        val latest = results().takeLast(SaceBenchmarkDataset.cases.size)
+        if (latest.isEmpty()) return "Nenhum benchmark executado ainda."
+        val lines = latest.map { result ->
+            val label = result.roleId.replaceFirstChar { it.uppercase() }
+            val grade = result.score?.let { it.toString() + "/100 (confiança " + (result.confidence ?: 0) + "%)" } ?: "sem nota"
+            "• " + label + " — " + result.skill + ": " + if (result.completed) grade else "falha de inferência"
+        }
+        val scored = latest.mapNotNull { it.score }
+        val average = scored.takeIf { it.isNotEmpty() }?.average()?.toInt()
+        return buildString {
+            append("Benchmark v" + SaceBenchmarkDataset.VERSION + " — " + latest.size + "/" + SaceBenchmarkDataset.cases.size + " casos registrados.\n")
+            append(lines.joinToString("\n"))
+            if (average != null) append("\nMédia estimada: " + average + "/100 em " + scored.size + " respostas avaliadas.")
+            append("\nAs notas são estimativas de segunda passada do próprio modelo, não uma avaliação independente.")
+        }
+    }
+
+    companion object {
+        private const val KEY_RESULTS = "results"
+        private const val MAX_RESULTS = 90
+    }
+}
