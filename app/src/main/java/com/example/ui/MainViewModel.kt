@@ -482,7 +482,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val profile = container.deviceProfiler.captureProfile()
             val thermal = profile.thermalStatusLabel
             val severeThermal = container.deviceProfiler.isThermalSevereOrCritical()
-            val lowMemory = container.deviceProfiler.isSystemLowMemory() || profile.availableRamMb < 650L
+            val lowMemory = container.deviceProfiler.isSystemLowMemory() || profile.availableRamMb < 760L
             if (!severeThermal && !lowMemory) {
                 _calibrationState.value = _calibrationState.value.copy(thermalMessage = null)
                 if (thermal.contains("leve", ignoreCase = true) || thermal.contains("Moderado", ignoreCase = true)) delay(4_000L)
@@ -864,6 +864,83 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } finally {
                 container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração")
+                InferenceTaskForegroundService.finishTask(getApplication())
+            }
+        }
+    }
+
+
+    /**
+     * Runs a fixed evaluation set kept separate from calibration/adaptive history.
+     * Scores are second-pass estimates from the same agent, not independent ground truth.
+     */
+    fun runSaceBenchmark() {
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
+        benchmarkJob?.cancel()
+        benchmarkJob = viewModelScope.launch {
+            val cases = SaceBenchmarkDataset.cases
+            _calibrationState.value = _calibrationState.value.copy(
+                isBenchmarkRunning = true, benchmarkProgress = 0,
+                benchmarkReport = "", benchmarkError = null, thermalMessage = null
+            )
+            InferenceTaskForegroundService.startTask(getApplication())
+            try {
+                cases.forEachIndexed { index, testCase ->
+                    awaitSafeSaceConditions()
+                    val role = when (testCase.roleId) {
+                        "coding" -> AgentRole.CODING
+                        "reasoning" -> AgentRole.REASONING
+                        else -> AgentRole.VISION
+                    }
+                    val imagePath = if (role == AgentRole.VISION) createCalibrationImage(index + 40) else null
+                    val turns = listOf(ChatTurn("user", testCase.prompt, imagePath = imagePath))
+                    var output = ""
+                    var failure: String? = null
+                    val stream = when (role) {
+                        AgentRole.CODING -> container.codingAgent.streamExecute(turns, "SACE_BENCHMARK", maxTokensOverride = 420)
+                        AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "SACE_BENCHMARK", maxTokensOverride = 300)
+                        AgentRole.VISION -> container.visionAgent.streamExecute(turns, "SACE_BENCHMARK", maxTokensOverride = 240)
+                    }
+                    stream.collect { event ->
+                        when (event) {
+                            is InferenceStreamEvent.Token -> output += event.text
+                            is InferenceStreamEvent.Completed -> output = event.fullText.ifBlank { output }
+                            is InferenceStreamEvent.Failed -> failure = event.errorMessage
+                            else -> Unit
+                        }
+                    }
+                    val succeeded = failure == null && output.isNotBlank()
+                    val evaluation = if (succeeded) {
+                        runCatching { evaluateCalibrationAnswer(role, testCase.prompt, output, imagePath) }.getOrNull()
+                    } else null
+                    saceBenchmarkStore.record(
+                        SaceBenchmarkResult(
+                            caseId = testCase.id, roleId = testCase.roleId, skill = testCase.skill,
+                            completed = succeeded, score = evaluation?.score, confidence = evaluation?.confidence,
+                            feedback = evaluation?.feedback ?: failure.orEmpty(),
+                            outputPreview = output.take(400), timestamp = System.currentTimeMillis()
+                        )
+                    )
+                    _calibrationState.value = _calibrationState.value.copy(
+                        benchmarkProgress = index + 1,
+                        benchmarkReport = saceBenchmarkStore.summary()
+                    )
+                }
+                _calibrationState.value = _calibrationState.value.copy(
+                    isBenchmarkRunning = false, benchmarkReport = saceBenchmarkStore.summary()
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isBenchmarkRunning = false, benchmarkError = "Benchmark interrompido."
+                )
+                throw cancelled
+            } catch (error: Exception) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isBenchmarkRunning = false,
+                    benchmarkError = error.message ?: "Falha ao executar benchmark."
+                )
+            } finally {
+                container.inferenceRuntimeManager.unloadAllModels("Fim do SACE Benchmark")
                 InferenceTaskForegroundService.finishTask(getApplication())
             }
         }
