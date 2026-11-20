@@ -32,7 +32,8 @@ class SaceCheckpointRecoveryTest {
             startedAt = 1_800_000_000_000L,
             sessionNumber = 12,
             selectedModes = mapOf("coding" to CalibrationMode.ADVANCED.name, "vision" to CalibrationMode.NORMAL.name),
-            selectedDurations = mapOf("coding" to 75, "reasoning" to 40, "vision" to 25)
+            selectedDurations = mapOf("coding" to 75, "reasoning" to 40, "vision" to 25),
+            elapsedMs = 42_000L
         )
 
         val checkpoint = store.readCheckpoint()
@@ -42,6 +43,7 @@ class SaceCheckpointRecoveryTest {
         assertEquals(CalibrationMode.ADVANCED.name, checkpoint?.mode)
         assertEquals(4, checkpoint?.nextAttempt)
         assertEquals(12, checkpoint?.sessionNumber)
+        assertEquals(42_000L, checkpoint?.elapsedMs)
         assertEquals(75, checkpoint?.selectedDurations?.get("coding"))
         assertEquals(40, checkpoint?.selectedDurations?.get("reasoning"))
         assertEquals(CalibrationMode.NORMAL.name, checkpoint?.selectedModes?.get("vision"))
