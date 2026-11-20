@@ -2,6 +2,10 @@ package com.example.ui
 
 import android.app.Application
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.LocalDevAiApplication
@@ -428,6 +432,146 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopAgentConsole(role: AgentRole) {
         consoleJobs.remove(role)?.cancel()
         updateConsole(role) { it.copy(isGenerating = false) }
+    }
+
+
+    // --- AI Calibration Lab ---
+    private val _calibrationState = MutableStateFlow(CalibrationUiState())
+    val calibrationState: StateFlow<CalibrationUiState> = _calibrationState.asStateFlow()
+    private var calibrationJob: Job? = null
+
+    fun startCalibration() {
+        if (_calibrationState.value.isRunning) return
+        calibrationJob?.cancel()
+        calibrationJob = viewModelScope.launch {
+            val roles = listOf(AgentRole.VISION, AgentRole.REASONING, AgentRole.CODING)
+            val cases = mapOf(
+                AgentRole.VISION to listOf(
+                    "Analise a captura de uma interface. Identifique regiões, hierarquia visual, transparência aparente, sombras e cantos. Separe observações de hipóteses.",
+                    "Descreva a posição relativa da barra superior, painel lateral, área principal e cartões. Não invente coordenadas nem texto ilegível.",
+                    "Compare a linguagem visual desta interface com macOS, Windows, GNOME e KDE. Use sinais concretos e indique o nível de confiança."
+                ),
+                AgentRole.REASONING to listOf(
+                    "Teste lógico: Ana é mais velha que Bia. Bia é mais velha que Caio. Diego é mais novo que Caio. Ordene as quatro pessoas da mais velha para a mais nova e explique brevemente.",
+                    "Planejamento: um app precisa importar um arquivo, validar seu formato, salvar com segurança e mostrar o resultado. Proponha uma sequência mínima e três casos de erro.",
+                    "Revisão crítica: uma solução funciona no caso comum, mas falha com entrada vazia e arquivo duplicado. Explique como testar e corrigir sem presumir detalhes."
+                ),
+                AgentRole.CODING to listOf(
+                    "Encontre e corrija os erros neste Kotlin: fun dividir(a: Int, b: Int): Int { return a / b }; println(dividir(10, 0)). Explique a causa e apresente uma versão segura.",
+                    "Revise este Python: items = [1, 2, 3]; for i in range(len(items) + 1): print(items[i]). Identifique o bug, corrija e explique o limite do índice.",
+                    "Ambiente de desenvolvimento: explique como identificar Windows/PowerShell, macOS/zsh ou Linux/bash antes de escolher comandos. Dê um exemplo seguro de inspeção para cada um e não alegue execução."
+                )
+            )
+            val report = StringBuilder()
+            var completed = 0
+            val total = cases.values.sumOf { it.size }
+            _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
+            try {
+                val visionImage = createCalibrationImage()
+                for (role in roles) {
+                    _calibrationState.value = _calibrationState.value.copy(
+                        currentRole = role, currentCase = "Preparando " + role.displayName
+                    )
+                    val roleNotes = StringBuilder()
+                    for ((index, prompt) in cases.getValue(role).withIndex()) {
+                        _calibrationState.value = _calibrationState.value.copy(
+                            currentCase = role.displayName + ": exercício " + (index + 1) + "/3",
+                            latestOutput = "", error = null
+                        )
+                        val turns = listOf(ChatTurn(
+                            role = "user", text = prompt,
+                            imagePath = if (role == AgentRole.VISION) visionImage else null
+                        ))
+                        var output = ""
+                        var failure: String? = null
+                        val stream = when (role) {
+                            AgentRole.VISION -> container.visionAgent.streamExecute(turns, "CALIBRATION", maxTokensOverride = 240)
+                            AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "CALIBRATION", maxTokensOverride = 320)
+                            AgentRole.CODING -> container.codingAgent.streamExecute(turns, "CALIBRATION", maxTokensOverride = 512)
+                        }
+                        stream.collect { event ->
+                            when (event) {
+                                is InferenceStreamEvent.Token -> output += event.text
+                                is InferenceStreamEvent.Completed -> output = event.fullText.ifBlank { output }
+                                is InferenceStreamEvent.Failed -> failure = event.errorMessage
+                                else -> Unit
+                            }
+                            _calibrationState.value = _calibrationState.value.copy(
+                                latestOutput = output.takeLast(3500), error = failure
+                            )
+                        }
+                        if (failure != null) {
+                            report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
+                        } else {
+                            roleNotes.append("\n[Exemplo ").append(index + 1).append("] ")
+                                .append(prompt.take(160)).append("\n[Resposta] ")
+                                .append(output.take(360)).append("\n")
+                            report.append("\n• ").append(role.displayName).append(" — exercício ")
+                                .append(index + 1).append(": concluído.")
+                        }
+                        completed++
+                        _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
+                    }
+                    if (roleNotes.isNotBlank()) {
+                        val dao = container.database.agentConfigDao()
+                        val cfg = dao.getByRole(role.id) ?: AgentConfigEntity(roleId = role.id)
+                        val prior = cfg.systemPromptOverride.orEmpty().substringBefore("\n\n[AI CALIBRATION EXAMPLES]")
+                        val block = roleNotes.toString().take(1250)
+                        val updated = (prior + "\n\n[AI CALIBRATION EXAMPLES]\nUse os exemplos anteriores como referências, sem copiar respostas cegamente; priorize correção e evidências na tarefa atual.\n" + block).trim()
+                        dao.upsert(cfg.copy(systemPromptOverride = updated.take(5000)))
+                    }
+                }
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false, currentRole = null, currentCase = "Calibração concluída",
+                    report = "Sessão concluída. Exemplos bem-sucedidos foram anexados aos prompts especializados.\n" + report
+                )
+                _uiBannerMessage.value = "AI Calibration Lab: sessão concluída. Perfis de referência atualizados."
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                _calibrationState.value = _calibrationState.value.copy(isRunning = false, currentCase = "Sessão interrompida")
+                throw cancelled
+            } catch (error: Exception) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false, error = error.message ?: "Falha inesperada na calibração."
+                )
+            } finally {
+                container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração")
+            }
+        }
+    }
+
+    fun stopCalibration() {
+        calibrationJob?.cancel()
+        calibrationJob = null
+        viewModelScope.launch {
+            container.inferenceRuntimeManager.unloadAllModels("Calibração interrompida pelo usuário")
+        }
+        _calibrationState.value = _calibrationState.value.copy(isRunning = false, currentCase = "Sessão interrompida")
+    }
+
+    private fun createCalibrationImage(): String {
+        val file = File(getApplication<Application>().cacheDir, "calibration_ui_sample.png")
+        if (file.exists() && file.length() > 0) return file.absolutePath
+        val bitmap = Bitmap.createBitmap(640, 360, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        canvas.drawColor(Color.rgb(24, 28, 38))
+        paint.color = Color.rgb(37, 43, 57); canvas.drawRoundRect(18f, 18f, 622f, 342f, 18f, 18f, paint)
+        paint.color = Color.rgb(54, 62, 80); canvas.drawRoundRect(18f, 18f, 622f, 66f, 18f, 18f, paint)
+        paint.color = Color.WHITE; paint.textSize = 18f; canvas.drawText("NEBULA • Workspace", 42f, 48f, paint)
+        paint.color = Color.rgb(47, 55, 72); canvas.drawRoundRect(32f, 82f, 174f, 326f, 12f, 12f, paint)
+        paint.color = Color.rgb(110, 170, 245); canvas.drawRoundRect(46f, 102f, 160f, 136f, 8f, 8f, paint)
+        paint.color = Color.LTGRAY; paint.textSize = 13f; canvas.drawText("Dashboard", 52f, 124f, paint)
+        canvas.drawText("Projects", 52f, 164f, paint); canvas.drawText("Settings", 52f, 194f, paint)
+        paint.color = Color.rgb(62, 73, 94); canvas.drawRoundRect(192f, 84f, 606f, 326f, 14f, 14f, paint)
+        paint.color = Color.WHITE; paint.textSize = 21f; canvas.drawText("Welcome back", 218f, 124f, paint)
+        paint.color = Color.rgb(93, 161, 226); canvas.drawRoundRect(218f, 150f, 568f, 224f, 12f, 12f, paint)
+        paint.color = Color.WHITE; paint.textSize = 16f; canvas.drawText("System overview", 238f, 180f, paint)
+        paint.color = Color.rgb(180, 195, 220); canvas.drawText("3 agents online • 2 tasks", 238f, 204f, paint)
+        paint.color = Color.rgb(82, 96, 120); canvas.drawRoundRect(218f, 242f, 380f, 302f, 10f, 10f, paint)
+        canvas.drawRoundRect(396f, 242f, 568f, 302f, 10f, 10f, paint)
+        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        return file.absolutePath
     }
 
     // --- Multi-Agent Orchestrator ---
