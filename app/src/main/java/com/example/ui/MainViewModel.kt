@@ -500,7 +500,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 latestOutput = output.takeLast(3500), error = failure
                             )
                         }
-                        if (failure != null) {
+                        if (failure != null || output.isBlank()) {
                             report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
                         } else {
                             roleNotes.append("\n[Exemplo ").append(index + 1).append("] ")
@@ -523,7 +523,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _calibrationState.value = _calibrationState.value.copy(
                     isRunning = false, currentRole = null, currentCase = "Calibração concluída",
-                    report = "Sessão concluída. Exemplos bem-sucedidos foram anexados aos prompts especializados.\n" + report
+                    report = "Sessão concluída. Respostas concluídas foram registradas como exemplos nos prompts especializados.\n" + report
                 )
                 _uiBannerMessage.value = "AI Calibration Lab: sessão concluída. Perfis de referência atualizados."
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
