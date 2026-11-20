@@ -759,7 +759,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 saceProgressStore.clearCheckpoint()
                 _calibrationState.value = _calibrationState.value.copy(
                     isRunning = false, currentRole = null, currentCase = "Calibração concluída",
-                    report = "Sessão concluída. Respostas concluídas foram registradas como exemplos nos prompts especializados.\n" + report
+                    report = "Sessão concluída. Respostas geradas sem erro de inferência foram registradas como exemplos. Isso não significa que cada solução foi validada como correta.\n" + report
                 )
                 _uiBannerMessage.value = "AI Calibration Lab: sessão concluída. Perfis de referência atualizados."
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
