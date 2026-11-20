@@ -36,7 +36,7 @@ fun CalibrationScreen(
     ) {
         Text("AI Calibration Lab", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "Bateria local de exercícios para avaliar cada agente em sequência, um modelo por vez. Os exemplos aprovados são anexados ao prompt especializado como referências persistentes.",
+            "Bateria local de exercícios para avaliar cada agente em sequência, um modelo por vez. As respostas concluídas são anexadas ao prompt especializado como referências persistentes.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
