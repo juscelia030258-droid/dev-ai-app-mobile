@@ -468,17 +468,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun evaluateCalibrationAnswer(role: AgentRole, exercise: String, answer: String): SaceEvaluation? {
         val reviewPrompt = SaceAnswerEvaluator.buildPrompt(role.displayName, exercise, answer)
-        val reviewer = when (role) {
-            AgentRole.CODING -> container.codingAgent
-            AgentRole.REASONING -> container.reasoningAgent
-            AgentRole.VISION -> container.visionAgent
+        val reviewTurns = listOf(ChatTurn("user", reviewPrompt))
+        val reviewResult = when (role) {
+            AgentRole.CODING -> container.codingAgent.executeBlocking(reviewTurns, "SACE_SECOND_PASS_REVIEW")
+            AgentRole.REASONING -> container.reasoningAgent.executeBlocking(
+                messages = reviewTurns,
+                source = "SACE_SECOND_PASS_REVIEW",
+                temperatureOverride = 0.0f,
+                maxTokensOverride = 180
+            )
+            AgentRole.VISION -> container.visionAgent.executeBlocking(reviewTurns, "SACE_SECOND_PASS_REVIEW")
         }
-        val review = reviewer.executeBlocking(
-            messages = listOf(ChatTurn("user", reviewPrompt)),
-            source = "SACE_SECOND_PASS_REVIEW",
-            temperatureOverride = 0.0f,
-            maxTokensOverride = 180
-        ).getOrNull()?.text ?: return null
+        val review = reviewResult.getOrNull()?.text ?: return null
         return SaceAnswerEvaluator.parse(review)
     }
 
