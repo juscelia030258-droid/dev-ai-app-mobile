@@ -60,6 +60,7 @@ data class AgentConsoleState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as LocalDevAiApplication).container
+    private val saceProgressStore = SaceProgressStore(application)
 
     private val diagnosticsRunner = SystemDiagnosticsRunner(
         deviceProfiler = container.deviceProfiler,
@@ -480,7 +481,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "API: projete uma rota HTTP que recebe configuração, valida os campos, responde com erros claros e não salva dados inválidos.",
                     "Projeto modular: separe um aplicativo em interface, regras de negócio, armazenamento e acesso à rede. Mostre arquivos e responsabilidades.",
                     "Linux: analise um serviço que falha ao iniciar. Liste comandos de leitura seguros para conferir status, logs, permissões e dependências; não alegue execução.",
-                    "Linux: receba um projeto de laboratório com scripts, unidades systemd e arquivos de configuração. Aponte falhas, proponha melhorias e escreva testes sem alterar o sistema real."
+                    "Linux: receba um projeto de laboratório com scripts, unidades systemd e arquivos de configuração. Aponte falhas, proponha melhorias e escreva testes sem alterar o sistema real.",
+                    "ESP32 e sensores: crie um firmware C++ com leitura periódica, filtro simples, timeout de sensor e estado seguro quando a leitura falhar. Inclua testes.",
+                    "ESP32 e comunicação: projete uma troca de mensagens entre dois dispositivos usando um protocolo definido. Trate perda, repetição e dados inválidos.",
+                    "OLED e encoder: implemente a lógica de um menu com páginas, seleção, retorno, edição de valores e atualização sem bloquear o loop.",
+                    "Persistência: crie uma camada para salvar configurações com versão, valores padrão e recuperação quando os dados salvos estiverem inválidos.",
+                    "Kotlin Android: implemente uma tela de configurações com estado observável, validação, salvamento assíncrono e tratamento de erro.",
+                    "Java: analise uma classe com responsabilidades misturadas e proponha uma divisão em módulos sem alterar o comportamento público.",
+                    "Python: crie uma ferramenta de linha de comando que leia um arquivo, valide os dados e gere um relatório; trate arquivo ausente e conteúdo malformado.",
+                    "Build: analise um erro Gradle com dependências incompatíveis. Liste os arquivos e versões que precisa conferir antes de sugerir uma correção.",
+                    "Concorrência: revise um código que compartilha estado entre tarefas. Identifique condições de corrida e proponha sincronização adequada.",
+                    "Testes: transforme requisitos de um menu de firmware em casos de teste, incluindo limites, entradas inválidas e recuperação após reinicialização.",
+                    "Refatoração: receba um módulo grande e proponha uma divisão em arquivos, interfaces e responsabilidades, mantendo a compatibilidade.",
+                    "Revisão de segurança: analise uma API que recebe configurações e identifique validação ausente, exposição de segredos e operações perigosas."
                 ),
                 AgentRole.REASONING to listOf(
                     "Lógica: Ana é mais velha que Bia. Bia é mais velha que Caio. Diego é mais novo que Caio. Ordene as quatro pessoas e explique a dedução.",
@@ -491,7 +504,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "Investigação: receba três relatos que se contradizem sobre uma falha. Liste o que está confirmado, o que falta medir e qual teste distingue as hipóteses.",
                     "Planejamento: divida a criação de um firmware ESP32 com menu, configurações salvas e comunicação Wi-Fi em tarefas, dependências e critérios de aceite.",
                     "Colaboração: revise uma resposta da Coding AI que afirma ter compilado um projeto sem mostrar logs. Identifique o que pode e o que não pode ser confirmado.",
-                    "Conhecimento tecnológico: explique a diferença entre processo, serviço, thread, memória virtual e armazenamento, usando exemplos simples."
+                    "Conhecimento tecnológico: explique a diferença entre processo, serviço, thread, memória virtual e armazenamento, usando exemplos simples.",
+                    "Análise de desempenho: um app usa muita RAM depois de alternar entre modelos. Separe possíveis causas e proponha medições que confirmem cada uma.",
+                    "Arquitetura: compare execução sequencial e paralela de três modelos em um celular com memória limitada. Explique os custos de cada opção.",
+                    "Investigação: um firmware reinicia aleatoriamente. Organize hipóteses sobre alimentação, watchdog, memória e sensores e escolha uma ordem de testes.",
+                    "Dados: analise uma tabela pequena com valores ausentes e duplicados. Explique como limpar os dados sem apagar informação válida.",
+                    "Probabilidade: estime a chance de pelo menos uma falha em várias tentativas independentes e explique as suposições usadas.",
+                    "Pensamento crítico: avalie uma afirmação técnica sem fonte. Diga quais evidências seriam suficientes para aceitá-la ou rejeitá-la.",
+                    "Planejamento: organize um projeto com prazo curto, três módulos dependentes e recursos limitados. Defina ordem, riscos e critérios de conclusão.",
+                    "Conflito entre agentes: duas IAs dão soluções incompatíveis. Compare as evidências, identifique o ponto de discordância e proponha um teste decisivo.",
+                    "Sistema operacional: explique como um processo inicia, abre arquivos, usa memória e encerra. Diferencie o que é comum e o que varia entre Android, Linux e Windows.",
+                    "Limites de conhecimento: responda a um problema técnico com dados insuficientes. Mostre o que pode concluir e faça a pergunta mínima necessária."
                 ),
                 AgentRole.VISION to listOf(
                     "MAPA DE INTERFACE: identifique no máximo cinco componentes importantes, diga em que região estão e explique como se agrupam. Não descreva o fundo inteiro.",
@@ -503,14 +526,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "CONTAGEM E LOCALIZAÇÃO: conte apenas os cartões, botões ou painéis que conseguir distinguir. Informe quando algum elemento estiver parcialmente oculto.",
                     "COMPARAÇÃO: compare duas áreas da imagem e indique uma semelhança e uma diferença concreta, sem repetir a descrição geral.",
                     "DIAGNÓSTICO VISUAL: aponte o problema visual mais importante, a evidência e uma correção específica. Não suponha falhas de funcionamento.",
-                    "RESUMO COM EVIDÊNCIAS: responda à pergunta principal em até cinco tópicos; cada tópico deve conter uma observação visível, não uma suposição."
+                    "RESUMO COM EVIDÊNCIAS: responda à pergunta principal em até cinco tópicos; cada tópico deve conter uma observação visível, não uma suposição.",
+                    "FORMULÁRIO: identifique campos, rótulos, botões e agrupamentos. Informe a ordem de leitura e não suponha validações que não aparecem.",
+                    "TELA DE CONFIGURAÇÕES: agrupe opções por finalidade e destaque controles que parecem selecionados ou desativados.",
+                    "DASHBOARD: compare a hierarquia visual entre título, indicadores, gráficos e cartões. Cite somente elementos visíveis.",
+                    "ERRO VISUAL: procure sobreposição, corte, desalinhamento ou contraste insuficiente. Para cada achado, indique a região e a evidência.",
+                    "DIAGRAMA: identifique caixas, setas e relações visíveis. Se uma ligação estiver ambígua, marque como incerta.",
+                    "FOTO DE COMPONENTES: descreva somente componentes que conseguir distinguir e diferencie identificação provável de identificação confirmada.",
+                    "OCR: leia os textos mais importantes da imagem e preserve a escrita original. Não complete partes ilegíveis.",
+                    "COMPARAÇÃO DE TELAS: compare duas interfaces fornecidas, apontando mudanças concretas de posição, tamanho e estado.",
+                    "ACESSIBILIDADE VISUAL: avalie contraste aparente, tamanho relativo dos textos e clareza dos controles sem inferir recursos invisíveis.",
+                    "ESPECIFICAÇÃO: transforme a imagem em uma lista curta de componentes e relações que a Coding AI possa implementar."
                 )
             )
             val selectedDurations = _calibrationDurations.value
             val selectedModes = _calibrationModes.value
             val sacePrefs = getApplication<Application>().getSharedPreferences("sace_progress", 0)
-            val sessionNumber = sacePrefs.getInt("session_count", 0) + 1
-            sacePrefs.edit().putInt("session_count", sessionNumber).apply()
+            val sessionNumber = saceProgressStore.beginSession()
             val isSurpriseSession = sessionNumber % 5 == 0
             val report = StringBuilder("SACE — sessão #$sessionNumber")
             var completed = 0
@@ -548,7 +580,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     do {
                         if (System.currentTimeMillis() >= roleDeadline) break
                         val cycle = attempt / selectedPool.size
-                        val basePrompt = selectedPool[(initialOffset + attempt) % selectedPool.size]
+                        val exerciseIndex = saceProgressStore.chooseExerciseIndex(
+                            role.id, selectedPool.size, initialOffset + attempt
+                        )
+                        val basePrompt = selectedPool[exerciseIndex]
                         val isLinuxFinalHour = role == AgentRole.CODING &&
                             mode == CalibrationMode.ULTIMATE &&
                             System.currentTimeMillis() - roleStartedAt >= 4 * 60 * 60 * 1000L
@@ -567,8 +602,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             "ETAPA 4/5 — comparar regiões e identificar erros visuais.",
                             "ETAPA 5/5 — desafio final: produzir uma especificação visual clara para a Coding AI."
                         )
+                        val codingStage = listOf(
+                            "ETAPA 1/5 — firmware: C/C++, ESP32, sensores, GPIO, comunicação e estados seguros.",
+                            "ETAPA 2/5 — interfaces: menus navegáveis, opções, configurações persistentes e validação.",
+                            "ETAPA 3/5 — depuração: localizar causas, corrigir erros e criar testes de regressão.",
+                            "ETAPA 4/5 — integração: organizar um projeto completo em módulos e verificar os contratos entre eles.",
+                            "ETAPA 5/5 — Linux: analisar somente o projeto de laboratório fornecido, revisar scripts e serviços e testar melhorias em ambiente isolado."
+                        )
                         val stagePrefix = when {
                             mode != CalibrationMode.ULTIMATE -> ""
+                            role == AgentRole.CODING -> codingStage[ultimateHour] + " "
                             role == AgentRole.REASONING -> reasoningStage[ultimateHour] + " "
                             role == AgentRole.VISION -> visionStage[ultimateHour] + " "
                             else -> ""
@@ -608,6 +651,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 latestOutput = output.takeLast(3500), error = failure
                             )
                         }
+                        val attemptSucceeded = failure == null && output.isNotBlank()
+                        val skillLabel = basePrompt.substringBefore(":").takeIf { it.length <= 80 } ?: "Geral"
+                        saceProgressStore.recordAttempt(
+                            roleId = role.id,
+                            exerciseIndex = exerciseIndex,
+                            skill = skillLabel,
+                            completed = attemptSucceeded,
+                            outputChars = output.length,
+                            error = failure ?: if (output.isBlank()) "Resposta vazia" else null
+                        )
+                        saceProgressStore.saveCheckpoint(
+                            roleId = role.id,
+                            mode = mode.name,
+                            nextAttempt = attempt + 1,
+                            startedAt = roleStartedAt,
+                            sessionNumber = sessionNumber
+                        )
                         if (failure != null || output.isBlank()) {
                             report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
                             if (mode != CalibrationMode.ULTIMATE) break
@@ -618,7 +678,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             report.append("\n• ").append(role.displayName).append(" — exercício ")
                                 .append(attempt + 1).append(": concluído.")
                         }
-                        completed++
+                        if (attemptSucceeded) completed++
                         attempt++
                         sacePrefs.edit().putInt("next_${role.id}", (initialOffset + attempt) % selectedPool.size).apply()
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
@@ -629,6 +689,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     report.append("\n• ").append(role.displayName).append(": ")
                         .append(attempt).append(" tentativas nesta sessão.")
+                    report.append("\n").append(saceProgressStore.summaryForRole(role.id))
 
                     if (roleNotes.isNotBlank()) {
                         val dao = container.database.agentConfigDao()
@@ -676,19 +737,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 latestOutput = output.takeLast(2500), error = failure
                             )
                         }
+                        val surpriseSucceeded = failure == null && output.isNotBlank()
+                        saceProgressStore.recordAttempt(
+                            roleId = role.id,
+                            exerciseIndex = 1000 + sessionNumber,
+                            skill = "Teste surpresa",
+                            completed = surpriseSucceeded,
+                            outputChars = output.length,
+                            error = failure ?: if (output.isBlank()) "Resposta vazia" else null
+                        )
                         sacePrefs.edit()
                             .putString("surprise_${role.id}", output.take(600))
                             .putLong("surprise_time_${role.id}", System.currentTimeMillis())
                             .apply()
                         report.append("\n• ").append(role.displayName)
-                            .append(if (failure == null && output.isNotBlank()) ": resposta registrada para avaliação." else ": teste não concluído — " + failure)
-                        completed++
+                            .append(if (surpriseSucceeded) ": resposta registrada para avaliação." else ": teste não concluído — " + failure)
+                        if (surpriseSucceeded) completed++
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                     }
                 }
+                saceProgressStore.clearCheckpoint()
                 _calibrationState.value = _calibrationState.value.copy(
                     isRunning = false, currentRole = null, currentCase = "Calibração concluída",
-                    report = "Sessão concluída. Respostas concluídas foram registradas como exemplos nos prompts especializados.\n" + report
+                    report = "Sessão concluída. Respostas geradas sem erro de inferência foram registradas como exemplos. Isso não significa que cada solução foi validada como correta.\n" + report
                 )
                 _uiBannerMessage.value = "AI Calibration Lab: sessão concluída. Perfis de referência atualizados."
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
