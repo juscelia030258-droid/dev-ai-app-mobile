@@ -102,7 +102,12 @@ fun CalibrationScreen(
         if (state.isBenchmarkRunning) {
             Text("Benchmark separado — " + state.benchmarkProgress + " / 9 casos", fontWeight = FontWeight.SemiBold)
             LinearProgressIndicator(progress = { (state.benchmarkProgress.toFloat() / 9f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-            state.benchmarkError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            state.thermalMessage?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        state.benchmarkError?.let {
+            Text("Benchmark: " + it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
         if (state.isRunning) {
             Text(state.currentCase, fontWeight = FontWeight.SemiBold)
