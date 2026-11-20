@@ -572,6 +572,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             } finally {
                 container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração")
+                InferenceTaskForegroundService.finishTask(getApplication())
             }
         }
     }
