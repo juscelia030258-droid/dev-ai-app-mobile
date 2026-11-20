@@ -42,7 +42,7 @@ class ModelRepository(
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .followRedirects(true)
-        .followSslRedirects(true)
+        .followSslRedirects(false)
         .build()
 
     private val _downloadState = MutableStateFlow<DownloadProgressState?>(null)
