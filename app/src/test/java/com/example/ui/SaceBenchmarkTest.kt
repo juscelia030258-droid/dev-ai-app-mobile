@@ -43,4 +43,19 @@ class SaceBenchmarkTest {
         assertTrue(store.summary().contains("84/100"))
         assertFalse(progress.summaryForRole("coding").contains("Depuração"))
     }
+    @Test
+    fun summaryComparesDistinctBenchmarkRuns() {
+        store.record(SaceBenchmarkResult(
+            "coding-debug-01", "coding", "Depuração", true, 60, 70,
+            "Primeira execução.", "Resposta A", 1000L, 1L
+        ))
+        store.record(SaceBenchmarkResult(
+            "coding-debug-01", "coding", "Depuração", true, 80, 75,
+            "Segunda execução.", "Resposta B", 2000L, 2L
+        ))
+
+        assertTrue(store.summary().contains("+20 pontos"))
+        assertTrue(store.summary().contains("anterior 60/100"))
+    }
+
 }
