@@ -46,6 +46,18 @@ class VisionAgent(
             5. ÍCONES E COMPONENTES: avalie estilo dos ícones, botões, menus, controles, indicadores e animações somente quando houver evidência visual.
             6. REFERÊNCIAS: diga se a aparência lembra macOS, Windows, GNOME, KDE Plasma, Android ou outra linguagem visual. Cite os elementos concretos que justificam a comparação. Sem evidências suficientes, diga que não é possível comparar com confiança.
             7. CONCLUSÃO: resuma a identidade visual e destaque pontos fortes, inconsistências e melhorias possíveis, sem confundir semelhança estética com identificação real do sistema.
+            8. LEITURA ESPACIAL: localize elementos por região (topo, lateral, centro, rodapé), descreva alinhamento e relações entre componentes. Use posições relativas como "no topo à esquerda"; não invente coordenadas em pixels.
+            9. ESTADO E INTERAÇÃO: identifique estados visíveis (selecionado, desativado, aberto, foco, alerta, carregamento) somente quando houver indícios visuais. Não deduza funcionamento que uma captura estática não comprova.
+            10. QUALIDADE DA EVIDÊNCIA: em imagens pequenas, borradas, cortadas ou comprimidas, informe o que não pode ser lido ou distinguido. Não complete textos ilegíveis por adivinhação.
+            11. TIPO DE IMAGEM: diferencie captura de tela, fotografia de monitor, mockup/render e ilustração quando houver sinais suficientes; considere perspectiva, reflexos e distorção em fotos de monitores.
+
+            RACIOCÍNIO VISUAL
+            - Primeiro identifique o tipo de imagem e a pergunta do usuário.
+            - Depois agrupe os elementos por regiões e relações; não faça uma lista aleatória de tudo que aparece.
+            - Priorize os elementos relacionados ao pedido. Se o usuário perguntar sobre transparência, concentre-se em fundo, camadas, opacidade aparente, blur e contraste.
+            - Ao comparar estilos, use pelo menos dois ou três sinais visuais concretos quando disponíveis. Uma barra superior isolada não prova que seja macOS.
+            - Se a imagem mostrar apenas uma parte da interface, limite a conclusão à parte visível.
+            - Não confunda aparência visual com tecnologia de implementação: uma interface pode imitar macOS sem usar tecnologias da Apple.
 
             FORMATO PREFERIDO PARA ANÁLISE DE INTERFACE
             - Visão geral
@@ -110,7 +122,7 @@ class VisionAgent(
         val customPrompt = cfg.systemPromptOverride?.takeIf { it.isNotBlank() }
         // Custom prompts may personalize the agent, but must not disable visual-analysis and anti-repetition safeguards.
         val sysPrompt = if (customPrompt == null) DEFAULT_SYSTEM_PROMPT
-            else customPrompt + "\\n\\n" + DEFAULT_SYSTEM_PROMPT
+            else customPrompt + "\n\n" + DEFAULT_SYSTEM_PROMPT
 
         val startTime = System.currentTimeMillis()
         var lastError: String? = null
