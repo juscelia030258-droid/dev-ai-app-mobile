@@ -29,6 +29,8 @@ import com.example.ui.CalibrationUiState
 fun CalibrationScreen(
     state: CalibrationUiState,
     durations: Map<AgentRole, Int>,
+    modes: Map<AgentRole, CalibrationMode>,
+    onModeChange: (AgentRole, CalibrationMode) -> Unit,
     onDurationChange: (AgentRole, Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit
@@ -60,14 +62,32 @@ fun CalibrationScreen(
                         Text("• " + minutes + " min", color = MaterialTheme.colorScheme.primary)
                     }
                     Text(detail, style = MaterialTheme.typography.bodySmall)
-                    Slider(
-                        value = minutes.toFloat(),
-                        onValueChange = { onDurationChange(role, it.toInt().coerceIn(range.first, range.last)) },
-                        valueRange = range.first.toFloat()..range.last.toFloat(),
-                        steps = range.last - range.first - 1,
-                        enabled = !state.isRunning
-                    )
-                    Text("De " + range.first + " a " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        CalibrationMode.entries.forEach { option ->
+                            if (mode == option) {
+                                Button(onClick = { onModeChange(role, option) }, enabled = !state.isRunning) {
+                                    Text(option.title)
+                                }
+                            } else {
+                                OutlinedButton(onClick = { onModeChange(role, option) }, enabled = !state.isRunning) {
+                                    Text(option.title)
+                                }
+                            }
+                        }
+                    }
+                    Text(mode.description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (mode == CalibrationMode.ULTIMATE) {
+                        Text("Duração fixa: 5 horas", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    } else {
+                        Slider(
+                            value = minutes.toFloat(),
+                            onValueChange = { onDurationChange(role, it.toInt().coerceIn(range.first, range.last)) },
+                            valueRange = range.first.toFloat()..range.last.toFloat(),
+                            steps = range.last - range.first - 1,
+                            enabled = !state.isRunning
+                        )
+                        Text("De " + range.first + " a " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -98,7 +118,7 @@ fun CalibrationScreen(
             }
         }
         Text(
-            "Os tempos são limites máximos, não uma obrigação de manter o processador ocupado. Nesta versão, a bateria tem três exercícios por IA e pode terminar antes. A calibração salva exemplos nos prompts, mas não altera os pesos dos modelos.",
+            "O modo Ultimate reserva 5 horas para cada IA selecionada. O tempo é um limite, não uma garantia de que o Android manterá o processo ativo. A calibração usa exemplos e instruções; não altera os pesos dos modelos.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
