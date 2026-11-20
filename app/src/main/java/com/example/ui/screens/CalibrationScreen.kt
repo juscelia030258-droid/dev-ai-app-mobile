@@ -16,6 +16,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -27,24 +28,28 @@ import com.example.ui.CalibrationUiState
 @Composable
 fun CalibrationScreen(
     state: CalibrationUiState,
+    durations: Map<AgentRole, Int>,
+    onDurationChange: (AgentRole, Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit
 ) {
+    val agents = listOf(
+        Triple(AgentRole.VISION, "Análise de interface, hierarquia visual, efeitos e comparação de sistemas.", 1..60),
+        Triple(AgentRole.REASONING, "Lógica, planejamento, verificação de premissas e casos-limite.", 1..90),
+        Triple(AgentRole.CODING, "Depuração, correção de bugs, sistemas operacionais e shells.", 1..120)
+    )
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("AI Calibration Lab", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "Bateria local de exercícios para avaliar cada agente em sequência, um modelo por vez. As respostas concluídas são anexadas ao prompt especializado como referências persistentes.",
+            "Escolha o tempo máximo de cada agente. O aplicativo calibra um modelo por vez e encerra cada etapa ao concluir os exercícios ou atingir o limite escolhido.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        listOf(
-            Triple(AgentRole.VISION, "20 min", "Análise de interface, hierarquia visual, efeitos e comparação de sistemas."),
-            Triple(AgentRole.REASONING, "45 min", "Lógica, planejamento, verificação de premissas e casos-limite."),
-            Triple(AgentRole.CODING, "60 min", "Depuração de código, correção de bugs e identificação de shells e sistemas.")
-        ).forEach { (role, duration, detail) ->
+        agents.forEach { (role, detail, range) ->
+            val minutes = durations[role] ?: 20
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -52,16 +57,24 @@ fun CalibrationScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(role.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("• " + duration, color = MaterialTheme.colorScheme.primary)
+                        Text("• " + minutes + " min", color = MaterialTheme.colorScheme.primary)
                     }
                     Text(detail, style = MaterialTheme.typography.bodySmall)
+                    Slider(
+                        value = minutes.toFloat(),
+                        onValueChange = { onDurationChange(role, it.toInt().coerceIn(range.first, range.last)) },
+                        valueRange = range.first.toFloat()..range.last.toFloat(),
+                        steps = range.last - range.first - 1,
+                        enabled = !state.isRunning
+                    )
+                    Text("De " + range.first + " a " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
         if (state.isRunning) {
             Text(state.currentCase, fontWeight = FontWeight.SemiBold)
             LinearProgressIndicator(
-                progress = if (state.totalCases == 0) 0f else state.completedCases.toFloat() / state.totalCases,
+                progress = { if (state.totalCases == 0) 0f else state.completedCases.toFloat() / state.totalCases },
                 modifier = Modifier.fillMaxWidth()
             )
             Text(state.completedCases.toString() + " / " + state.totalCases + " exercícios")
@@ -74,9 +87,7 @@ fun CalibrationScreen(
         } else {
             Button(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("Iniciar calibração completa") }
         }
-        state.error?.let {
-            Text("Aviso: " + it, color = MaterialTheme.colorScheme.error)
-        }
+        state.error?.let { Text("Aviso: " + it, color = MaterialTheme.colorScheme.error) }
         if (state.report.isNotBlank()) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp)) {
@@ -87,7 +98,7 @@ fun CalibrationScreen(
             }
         }
         Text(
-            "Importante: esta versão não altera os pesos dos modelos. Ela testa as respostas e salva exemplos no prompt de cada agente. A duração mostrada é a janela planejada, não uma promessa de manter o processador ocupado por todo esse tempo.",
+            "Os tempos são limites máximos, não uma obrigação de manter o processador ocupado. Nesta versão, a bateria tem três exercícios por IA e pode terminar antes. A calibração salva exemplos nos prompts, mas não altera os pesos dos modelos.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
