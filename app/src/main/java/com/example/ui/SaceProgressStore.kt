@@ -113,7 +113,7 @@ class SaceProgressStore(context: Context) {
             val old = skills[skill] ?: (0 to 0)
             skills[skill] = if (success) (old.first + 1 to old.second) else (old.first to old.second + 1)
         }
-        val skillText = skills.entries.takeLast(5).joinToString("; ") { (name, counts) ->
+        val skillText = skills.entries.toList().takeLast(5).joinToString("; ") { (name, counts) ->
             "$name: ${counts.first} concluídos/${counts.second} falhas"
         }
         val evaluated = (0 until attempts.length()).mapNotNull { attempts.optJSONObject(it) }
