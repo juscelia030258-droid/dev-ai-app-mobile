@@ -471,27 +471,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         calibrationJob = viewModelScope.launch {
             val roles = listOf(AgentRole.CODING, AgentRole.REASONING, AgentRole.VISION)
             val cases = mapOf(
+                AgentRole.CODING to listOf(
+                    "Firmware ESP32: planeje um firmware C++ para ler um sensor, controlar uma saída e tratar falha de leitura. Inclua estados e critérios de teste.",
+                    "Menu funcional: crie a estrutura de um menu para OLED com opções, navegação por encoder e retorno. Explique como evitar bloqueios no loop principal.",
+                    "Configurações persistentes: implemente em Kotlin uma tela de opções que salva preferências, valida valores e restaura padrões.",
+                    "Depuração Kotlin: fun dividir(a: Int, b: Int): Int { return a / b }; println(dividir(10, 0)). Identifique e corrija a falha.",
+                    "Depuração Python: items = [1, 2, 3]; for i in range(len(items) + 1): print(items[i]). Corrija o limite e proponha um teste.",
+                    "API: projete uma rota HTTP que recebe configuração, valida os campos, responde com erros claros e não salva dados inválidos.",
+                    "Projeto modular: separe um aplicativo em interface, regras de negócio, armazenamento e acesso à rede. Mostre arquivos e responsabilidades.",
+                    "Linux: analise um serviço que falha ao iniciar. Liste comandos de leitura seguros para conferir status, logs, permissões e dependências; não alegue execução.",
+                    "Linux: receba um projeto de laboratório com scripts, unidades systemd e arquivos de configuração. Aponte falhas, proponha melhorias e escreva testes sem alterar o sistema real."
+                ),
+                AgentRole.REASONING to listOf(
+                    "Lógica: Ana é mais velha que Bia. Bia é mais velha que Caio. Diego é mais novo que Caio. Ordene as quatro pessoas e explique a dedução.",
+                    "Diagnóstico tecnológico: um celular fecha um modelo local ao abrir outro aplicativo. Analise RAM, memória livre, contexto do modelo e descarregamento; separe fatos de hipóteses.",
+                    "Hardware: explique como CPU, RAM, armazenamento e sistema operacional trabalham juntos ao abrir um modelo local de IA.",
+                    "Redes: um computador conecta ao Wi-Fi, mas não abre sites. Compare hipóteses envolvendo IP, DNS, gateway e conexão externa.",
+                    "Sistemas: compare duas arquiteturas para um app móvel com três modelos de IA e pouca RAM. Considere execução sequencial, tempo e custo de recarga.",
+                    "Investigação: receba três relatos que se contradizem sobre uma falha. Liste o que está confirmado, o que falta medir e qual teste distingue as hipóteses.",
+                    "Planejamento: divida a criação de um firmware ESP32 com menu, configurações salvas e comunicação Wi-Fi em tarefas, dependências e critérios de aceite.",
+                    "Colaboração: revise uma resposta da Coding AI que afirma ter compilado um projeto sem mostrar logs. Identifique o que pode e o que não pode ser confirmado.",
+                    "Conhecimento tecnológico: explique a diferença entre processo, serviço, thread, memória virtual e armazenamento, usando exemplos simples."
+                ),
                 AgentRole.VISION to listOf(
                     "Analise a captura de uma interface. Identifique regiões, hierarquia visual, transparência aparente, sombras e cantos. Separe observações de hipóteses.",
                     "Descreva a posição relativa da barra superior, painel lateral, área principal e cartões. Não invente coordenadas nem texto ilegível.",
-                    "Compare a linguagem visual desta interface com macOS, Windows, GNOME e KDE. Use sinais concretos e indique o nível de confiança."
-                ),
-                AgentRole.REASONING to listOf(
-                    "Teste lógico: Ana é mais velha que Bia. Bia é mais velha que Caio. Diego é mais novo que Caio. Ordene as quatro pessoas da mais velha para a mais nova e explique brevemente.",
-                    "Planejamento: um app precisa importar um arquivo, validar seu formato, salvar com segurança e mostrar o resultado. Proponha uma sequência mínima e três casos de erro.",
-                    "Revisão crítica: uma solução funciona no caso comum, mas falha com entrada vazia e arquivo duplicado. Explique como testar e corrigir sem presumir detalhes."
-                ),
-                AgentRole.CODING to listOf(
-                    "Encontre e corrija os erros neste Kotlin: fun dividir(a: Int, b: Int): Int { return a / b }; println(dividir(10, 0)). Explique a causa e apresente uma versão segura.",
-                    "Revise este Python: items = [1, 2, 3]; for i in range(len(items) + 1): print(items[i]). Identifique o bug, corrija e explique o limite do índice.",
-                    "Ambiente de desenvolvimento: explique como identificar Windows/PowerShell, macOS/zsh ou Linux/bash antes de escolher comandos. Dê um exemplo seguro de inspeção para cada um e não alegue execução."
+                    "Compare a linguagem visual desta interface com macOS, Windows, GNOME e KDE. Use sinais concretos e indique o nível de confiança.",
+                    "Faça uma leitura espacial da tela: identifique alinhamentos, agrupamentos, espaçamentos e elementos que parecem pertencer à mesma seção.",
+                    "Avalie contraste e legibilidade da interface. Aponte problemas visíveis sem inventar valores de cor ou tamanho.",
+                    "Prepare uma especificação visual para a Coding AI recriar os elementos que realmente aparecem na captura, separando medidas observadas de estimativas.",
+                    "Identifique estados visíveis de botões, menus e campos. Não deduza que uma ação funciona apenas pela aparência.",
+                    "Compare duas regiões da mesma captura e identifique inconsistências de estilo, alinhamento e hierarquia visual."
                 )
             )
             val selectedDurations = _calibrationDurations.value
             val selectedModes = _calibrationModes.value
             val report = StringBuilder()
             var completed = 0
-            val total = cases.values.sumOf { it.size }
+            val hasUltimate = selectedModes.values.any { it == CalibrationMode.ULTIMATE }
+            val total = if (hasUltimate) 0 else roles.sumOf { role ->
+                val mode = selectedModes[role] ?: CalibrationMode.NORMAL
+                when (mode) {
+                    CalibrationMode.NORMAL -> 3
+                    CalibrationMode.ADVANCED -> 6
+                    CalibrationMode.ULTIMATE -> 0
+                }
+            }
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
             InferenceTaskForegroundService.startTask(getApplication())
             try {
@@ -506,13 +531,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         currentRole = role, currentCase = "Preparando " + role.displayName
                     )
                     val roleNotes = StringBuilder()
-                    for ((index, prompt) in cases.getValue(role).withIndex()) {
-                        if (System.currentTimeMillis() >= roleDeadline) {
-                            report.append("\n• Tempo máximo atingido para ").append(role.displayName).append(".")
-                            break
+                    val pool = cases.getValue(role)
+                    val selectedPool = when (mode) {
+                        CalibrationMode.NORMAL -> pool.take(3)
+                        CalibrationMode.ADVANCED -> pool.take(6)
+                        CalibrationMode.ULTIMATE -> pool
+                    }
+                    val roleStartedAt = System.currentTimeMillis()
+                    var attempt = 0
+                    do {
+                        if (System.currentTimeMillis() >= roleDeadline) break
+                        val cycle = attempt / selectedPool.size
+                        val basePrompt = selectedPool[attempt % selectedPool.size]
+                        val isLinuxFinalHour = role == AgentRole.CODING &&
+                            mode == CalibrationMode.ULTIMATE &&
+                            System.currentTimeMillis() - roleStartedAt >= 4 * 60 * 60 * 1000L
+                        val prompt = if (isLinuxFinalHour) {
+                            "DESAFIO FINAL LINUX: use somente o projeto de laboratório e os arquivos que forem fornecidos nesta tarefa. " +
+                                "Mapeie a estrutura, analise scripts, serviços, permissões e dependências; encontre erros; proponha melhorias; " +
+                                "reescreva apenas módulos selecionados e crie testes. Não afirme que analisou uma distribuição inteira nem que executou comandos. " +
+                                "Tarefa: " + basePrompt
+                        } else if (cycle == 0) basePrompt else {
+                            basePrompt + "\n\nCrie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
                         }
                         _calibrationState.value = _calibrationState.value.copy(
-                            currentCase = role.displayName + " (" + mode.title + "): exercício " + (index + 1) + "/3",
+                            currentCase = role.displayName + " (" + mode.title + "): exercício " + (attempt + 1) +
+                                if (mode == CalibrationMode.ULTIMATE) " — ciclo " + (cycle + 1) else "",
                             latestOutput = "", error = null
                         )
                         val turns = listOf(ChatTurn(
@@ -539,16 +583,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         if (failure != null || output.isBlank()) {
                             report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
+                            if (mode != CalibrationMode.ULTIMATE) break
                         } else {
-                            roleNotes.append("\n[Exemplo ").append(index + 1).append("] ")
-                                .append(prompt.take(160)).append("\n[Resposta] ")
+                            roleNotes.append("\n[Exemplo ").append(attempt + 1).append("] ")
+                                .append(prompt.take(180)).append("\n[Resposta] ")
                                 .append(output.take(360)).append("\n")
                             report.append("\n• ").append(role.displayName).append(" — exercício ")
-                                .append(index + 1).append(": concluído.")
+                                .append(attempt + 1).append(": concluído.")
                         }
                         completed++
+                        attempt++
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
-                    }
+                        if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
+                    } while (mode == CalibrationMode.ULTIMATE && System.currentTimeMillis() < roleDeadline)
+                    report.append("\n• ").append(role.displayName).append(": ")
+                        .append(attempt).append(" tentativas nesta sessão.")
+
                     if (roleNotes.isNotBlank()) {
                         val dao = container.database.agentConfigDao()
                         val cfg = dao.getByRole(role.id) ?: AgentConfigEntity(roleId = role.id)
