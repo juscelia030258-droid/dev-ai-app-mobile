@@ -494,14 +494,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "Conhecimento tecnológico: explique a diferença entre processo, serviço, thread, memória virtual e armazenamento, usando exemplos simples."
                 ),
                 AgentRole.VISION to listOf(
-                    "Analise a captura de uma interface. Identifique regiões, hierarquia visual, transparência aparente, sombras e cantos. Separe observações de hipóteses.",
-                    "Descreva a posição relativa da barra superior, painel lateral, área principal e cartões. Não invente coordenadas nem texto ilegível.",
-                    "Compare a linguagem visual desta interface com macOS, Windows, GNOME e KDE. Use sinais concretos e indique o nível de confiança.",
-                    "Faça uma leitura espacial da tela: identifique alinhamentos, agrupamentos, espaçamentos e elementos que parecem pertencer à mesma seção.",
-                    "Avalie contraste e legibilidade da interface. Aponte problemas visíveis sem inventar valores de cor ou tamanho.",
-                    "Prepare uma especificação visual para a Coding AI recriar os elementos que realmente aparecem na captura, separando medidas observadas de estimativas.",
-                    "Identifique estados visíveis de botões, menus e campos. Não deduza que uma ação funciona apenas pela aparência.",
-                    "Compare duas regiões da mesma captura e identifique inconsistências de estilo, alinhamento e hierarquia visual."
+                    "MAPA DE INTERFACE: identifique no máximo cinco componentes importantes, diga em que região estão e explique como se agrupam. Não descreva o fundo inteiro.",
+                    "LEITURA DE TEXTO: transcreva somente os rótulos realmente legíveis. Marque texto incerto como [ilegível]; não complete palavras por contexto.",
+                    "GEOMETRIA: compare alinhamento, largura relativa, espaçamento e posição de cartões e painéis. Use relações como maior/menor e esquerda/direita, sem inventar pixels.",
+                    "ESTADO VISUAL: localize controles selecionados, desativados, alertas e indicadores de carregamento. Para cada estado, cite a evidência visual.",
+                    "AUDITORIA DE UI: encontre até três inconsistências de cor, tipografia, borda, alinhamento ou espaçamento. Se não houver evidência, diga que não encontrou.",
+                    "ESPECIFICAÇÃO PARA CODING AI: transforme a tela em uma lista curta de componentes, posição relativa, estilo aproximado e comportamento que a imagem comprova.",
+                    "CONTAGEM E LOCALIZAÇÃO: conte apenas os cartões, botões ou painéis que conseguir distinguir. Informe quando algum elemento estiver parcialmente oculto.",
+                    "COMPARAÇÃO: compare duas áreas da imagem e indique uma semelhança e uma diferença concreta, sem repetir a descrição geral.",
+                    "DIAGNÓSTICO VISUAL: aponte o problema visual mais importante, a evidência e uma correção específica. Não suponha falhas de funcionamento.",
+                    "RESUMO COM EVIDÊNCIAS: responda à pergunta principal em até cinco tópicos; cada tópico deve conter uma observação visível, não uma suposição."
                 )
             )
             val selectedDurations = _calibrationDurations.value
@@ -524,7 +526,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
             InferenceTaskForegroundService.startTask(getApplication())
             try {
-                val visionImage = createCalibrationImage()
                 for (role in roles) {
                     val mode = selectedModes[role] ?: CalibrationMode.NORMAL
                     val durationMinutes = if (mode == CalibrationMode.ULTIMATE) 300 else selectedDurations.getValue(role)
@@ -587,7 +588,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         val turns = listOf(ChatTurn(
                             role = "user", text = prompt,
-                            imagePath = if (role == AgentRole.VISION) visionImage else null
+                            imagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
                         ))
                         var output = ""
                         var failure: String? = null
@@ -655,7 +656,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val turns = listOf(ChatTurn(
                             role = "user",
                             text = surprisePrompts.getValue(role),
-                            imagePath = if (role == AgentRole.VISION) visionImage else null
+                            imagePath = if (role == AgentRole.VISION) createCalibrationImage(sessionNumber + 100) else null
                         ))
                         var output = ""
                         var failure: String? = null
@@ -713,27 +714,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _calibrationState.value = _calibrationState.value.copy(isRunning = false, currentCase = "Sessão interrompida")
     }
 
-    private fun createCalibrationImage(): String {
-        val file = File(getApplication<Application>().cacheDir, "calibration_ui_sample.png")
+    private fun createCalibrationImage(variant: Int = 0): String {
+        val safeVariant = ((variant % 6) + 6) % 6
+        val file = File(getApplication<Application>().cacheDir, "calibration_ui_sample_$safeVariant.png")
         if (file.exists() && file.length() > 0) return file.absolutePath
         val bitmap = Bitmap.createBitmap(640, 360, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val pageTitles = listOf("Workspace", "Device monitor", "Project files", "Network status", "Preferences", "Task manager")
+        val navItems = listOf("Dashboard", "Devices", "Files", "Network", "Settings", "Tasks")
+        val cardTitles = listOf("System overview", "Device health", "Recent files", "Connection", "Display options", "Active tasks")
+        val statusLines = listOf("3 agents online • 2 tasks", "CPU normal • RAM 68%", "12 files • 3 folders", "Wi-Fi connected • DNS ready", "Dark theme • Scale 100%", "2 running • 1 queued")
+        val active = safeVariant % 3
         canvas.drawColor(Color.rgb(24, 28, 38))
         paint.color = Color.rgb(37, 43, 57); canvas.drawRoundRect(18f, 18f, 622f, 342f, 18f, 18f, paint)
         paint.color = Color.rgb(54, 62, 80); canvas.drawRoundRect(18f, 18f, 622f, 66f, 18f, 18f, paint)
-        paint.color = Color.WHITE; paint.textSize = 18f; canvas.drawText("NEBULA • Workspace", 42f, 48f, paint)
+        paint.color = Color.WHITE; paint.textSize = 18f; canvas.drawText("NEBULA • " + pageTitles[safeVariant], 42f, 48f, paint)
         paint.color = Color.rgb(47, 55, 72); canvas.drawRoundRect(32f, 82f, 174f, 326f, 12f, 12f, paint)
-        paint.color = Color.rgb(110, 170, 245); canvas.drawRoundRect(46f, 102f, 160f, 136f, 8f, 8f, paint)
-        paint.color = Color.LTGRAY; paint.textSize = 13f; canvas.drawText("Dashboard", 52f, 124f, paint)
+        paint.color = Color.rgb(110, 170, 245); canvas.drawRoundRect(46f, (102 + active * 42).toFloat(), 160f, (136 + active * 42).toFloat(), 8f, 8f, paint)
+        paint.color = Color.LTGRAY; paint.textSize = 13f
+        canvas.drawText(navItems[safeVariant], 52f, (124 + active * 42).toFloat(), paint)
         canvas.drawText("Projects", 52f, 164f, paint); canvas.drawText("Settings", 52f, 194f, paint)
         paint.color = Color.rgb(62, 73, 94); canvas.drawRoundRect(192f, 84f, 606f, 326f, 14f, 14f, paint)
         paint.color = Color.WHITE; paint.textSize = 21f; canvas.drawText("Welcome back", 218f, 124f, paint)
         paint.color = Color.rgb(93, 161, 226); canvas.drawRoundRect(218f, 150f, 568f, 224f, 12f, 12f, paint)
-        paint.color = Color.WHITE; paint.textSize = 16f; canvas.drawText("System overview", 238f, 180f, paint)
-        paint.color = Color.rgb(180, 195, 220); canvas.drawText("3 agents online • 2 tasks", 238f, 204f, paint)
+        paint.color = Color.WHITE; paint.textSize = 16f; canvas.drawText(cardTitles[safeVariant], 238f, 180f, paint)
+        paint.color = Color.rgb(180, 195, 220); paint.textSize = 13f; canvas.drawText(statusLines[safeVariant], 238f, 204f, paint)
         paint.color = Color.rgb(82, 96, 120); canvas.drawRoundRect(218f, 242f, 380f, 302f, 10f, 10f, paint)
         canvas.drawRoundRect(396f, 242f, 568f, 302f, 10f, 10f, paint)
+        if (safeVariant % 2 == 1) {
+            paint.color = Color.rgb(235, 170, 90)
+            canvas.drawCircle(548f, 104f, 7f, paint)
+        }
         FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
         return file.absolutePath
