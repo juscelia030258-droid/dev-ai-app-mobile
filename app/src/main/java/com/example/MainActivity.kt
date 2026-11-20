@@ -155,6 +155,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
     val isRunningDiagnostics by viewModel.isRunningDiagnostics.collectAsStateWithLifecycle()
     val bannerMessage by viewModel.uiBannerMessage.collectAsStateWithLifecycle()
     val calibrationState by viewModel.calibrationState.collectAsStateWithLifecycle()
+    val calibrationDurations by viewModel.calibrationDurations.collectAsStateWithLifecycle()
 
     LaunchedEffect(bannerMessage) {
         val msg = bannerMessage
