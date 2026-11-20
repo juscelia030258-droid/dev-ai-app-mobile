@@ -437,8 +437,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- AI Calibration Lab ---
     private val _calibrationDurations = MutableStateFlow(
-        mapOf(AgentRole.VISION to 20, AgentRole.REASONING to 45, AgentRole.CODING to 60)
+        mapOf(AgentRole.CODING to 60, AgentRole.REASONING to 45, AgentRole.VISION to 20)
     )
+    private val _calibrationModes = MutableStateFlow(
+        mapOf(
+            AgentRole.CODING to CalibrationMode.NORMAL,
+            AgentRole.REASONING to CalibrationMode.NORMAL,
+            AgentRole.VISION to CalibrationMode.NORMAL
+        )
+    )
+    val calibrationModes: StateFlow<Map<AgentRole, CalibrationMode>> = _calibrationModes.asStateFlow()
+
+    fun setCalibrationMode(role: AgentRole, mode: CalibrationMode) {
+        if (_calibrationState.value.isRunning) return
+        _calibrationModes.value = _calibrationModes.value.toMutableMap().apply { put(role, mode) }
+    }
     val calibrationDurations: StateFlow<Map<AgentRole, Int>> = _calibrationDurations.asStateFlow()
 
     fun setCalibrationDuration(role: AgentRole, minutes: Int) {
@@ -456,7 +469,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_calibrationState.value.isRunning) return
         calibrationJob?.cancel()
         calibrationJob = viewModelScope.launch {
-            val roles = listOf(AgentRole.VISION, AgentRole.REASONING, AgentRole.CODING)
+            val roles = listOf(AgentRole.CODING, AgentRole.REASONING, AgentRole.VISION)
             val cases = mapOf(
                 AgentRole.VISION to listOf(
                     "Analise a captura de uma interface. Identifique regiões, hierarquia visual, transparência aparente, sombras e cantos. Separe observações de hipóteses.",
@@ -475,15 +488,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             val selectedDurations = _calibrationDurations.value
+            val selectedModes = _calibrationModes.value
             val report = StringBuilder()
             var completed = 0
             val total = cases.values.sumOf { it.size }
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
+            InferenceTaskForegroundService.startTask(getApplication())
             try {
                 val visionImage = createCalibrationImage()
                 for (role in roles) {
-                    val roleDeadline = System.currentTimeMillis() + selectedDurations.getValue(role) * 60_000L
-                    report.append("\n\n").append(role.displayName).append(": limite de ").append(selectedDurations.getValue(role)).append(" min.")
+                    val mode = selectedModes[role] ?: CalibrationMode.NORMAL
+                    val durationMinutes = if (mode == CalibrationMode.ULTIMATE) 300 else selectedDurations.getValue(role)
+                    val roleDeadline = System.currentTimeMillis() + durationMinutes * 60_000L
+                    report.append("\n\n").append(role.displayName).append(" — ").append(mode.title)
+                        .append(": limite de ").append(durationMinutes).append(" min.")
                     _calibrationState.value = _calibrationState.value.copy(
                         currentRole = role, currentCase = "Preparando " + role.displayName
                     )
@@ -494,7 +512,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             break
                         }
                         _calibrationState.value = _calibrationState.value.copy(
-                            currentCase = role.displayName + ": exercício " + (index + 1) + "/3",
+                            currentCase = role.displayName + " (" + mode.title + "): exercício " + (index + 1) + "/3",
                             latestOutput = "", error = null
                         )
                         val turns = listOf(ChatTurn(
