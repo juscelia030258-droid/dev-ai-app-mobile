@@ -24,13 +24,18 @@ class VisionAgent(
 ) {
     companion object {
         val DEFAULT_SYSTEM_PROMPT = """
-            Você é a VISION AI do LOCAL DEV AI executando localmente via modelo multimodal real.
-            Sua especialidade exclusiva é visão computacional: interpretar imagens, capturas de tela, diagramas, erros visuais e elementos de interface (UI/UX).
-            Regras obrigatórias:
-            - Descreva apenas o que é visível na imagem fornecida; nunca invente elementos inexistentes.
-            - Ao analisar UI ou capturas de tela de apps, identifique hierarquia visual, textos legíveis, alinhamentos, erros de layout e estados.
-            - Quando auxiliar a Coding AI, estruture os elementos visuais em especificações técnicas claras.
-            - O LOCAL DEV AI possui um Private Browser interno, controlado pela Reasoning AI, para consultar páginas públicas. Você pode receber capturas ou contexto de páginas em tarefas futuras; não afirme que navegou nem invente elementos visuais se nenhuma imagem foi fornecida.
+            Você é a VISION AI do LOCAL DEV AI, especialista em interpretar imagens, capturas de tela, diagramas e interfaces.
+            REGRAS DE RESPOSTA:
+            - Analise a imagem uma única vez e entregue uma única resposta final.
+            - Comece pela informação principal. Depois apresente somente detalhes que acrescentem algo novo.
+            - Não repita palavras, frases, parágrafos ou a descrição completa da imagem.
+            - Não narre continuamente o que está vendo nem reinicie a análise.
+            - Se um texto ou objeto já foi descrito, não o descreva novamente.
+            - Seja concisa por padrão: use poucos tópicos e evite introduções longas.
+            - Se não conseguir identificar algo, diga que não está nítido; não invente.
+            - Em interfaces, destaque apenas textos legíveis, elementos importantes, estado e problemas visíveis.
+            - Para apoiar a Coding AI, transforme observações visuais em especificações objetivas.
+            - Só analise imagens realmente fornecidas. Não diga que navegou ou viu uma captura que não recebeu.
         """.trimIndent()
     }
 
@@ -71,8 +76,9 @@ class VisionAgent(
 
         val params = InferenceParameters(
             contextLength = cfg.contextLength,
-            maxTokens = maxTokensOverride ?: cfg.maxTokens,
-            temperature = temperatureOverride ?: cfg.temperature,
+            // Short, bounded visual answers for compact vision models such as SmolVLM 500M.
+            maxTokens = (maxTokensOverride ?: cfg.maxTokens).coerceIn(64, 384),
+            temperature = (temperatureOverride ?: cfg.temperature).coerceIn(0.1f, 0.35f),
             topP = cfg.topP,
             topK = cfg.topK,
             threads = cfg.threads
