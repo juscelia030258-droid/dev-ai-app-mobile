@@ -500,9 +500,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun evaluateCalibrationAnswer(role: AgentRole, exercise: String, answer: String): SaceEvaluation? {
+    private suspend fun evaluateCalibrationAnswer(
+        role: AgentRole,
+        exercise: String,
+        answer: String,
+        imagePath: String? = null
+    ): SaceEvaluation? {
         val reviewPrompt = SaceAnswerEvaluator.buildPrompt(role.displayName, exercise, answer)
-        val reviewTurns = listOf(ChatTurn("user", reviewPrompt))
+        val reviewTurns = listOf(ChatTurn("user", reviewPrompt, imagePath = if (role == AgentRole.VISION) imagePath else null))
         val reviewResult = when (role) {
             AgentRole.CODING -> container.codingAgent.executeBlocking(reviewTurns, "SACE_SECOND_PASS_REVIEW")
             AgentRole.REASONING -> container.reasoningAgent.executeBlocking(
@@ -690,9 +695,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         awaitSafeSaceConditions()
                         if (pauseRequested) throw kotlinx.coroutines.CancellationException("Pausa solicitada pelo usuário")
+                        val calibrationImagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
                         val turns = listOf(ChatTurn(
                             role = "user", text = prompt,
-                            imagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
+                            imagePath = calibrationImagePath
                         ))
                         var output = ""
                         var failure: String? = null
@@ -715,7 +721,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val attemptSucceeded = failure == null && output.isNotBlank()
                         val evaluation = if (attemptSucceeded) {
                             try {
-                                evaluateCalibrationAnswer(role, prompt, output)
+                                evaluateCalibrationAnswer(role, prompt, output, calibrationImagePath)
                             } catch (_: Exception) {
                                 null
                             }
