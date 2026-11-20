@@ -154,7 +154,7 @@ class SaceBenchmarkStore(context: Context) {
         private const val KEY_RESULTS = "results"
         private const val KEY_RUNS = "runs"
         private const val KEY_LAST_RUN_ID = "last_run_id"
-        private const val MAX_RESULTS = 90
+        private const val MAX_RESULTS = 270
         private const val MAX_RUNS = 30
     }
 }
