@@ -190,6 +190,12 @@ class ModelRepository(
         var destFile: File? = null
         var mmprojFile: File? = null
         runCatching {
+            require(url.startsWith("https://", ignoreCase = true)) {
+                "Downloads de modelos exigem uma URL HTTPS segura."
+            }
+            require(mmprojUrl.isNullOrBlank() || mmprojUrl.startsWith("https://", ignoreCase = true)) {
+                "O download do projetor mmproj também exige HTTPS."
+            }
             val fileName = url.substringAfterLast('/').substringBefore('?')
                 .ifBlank { "${presetId}.gguf" }
                 .replace(Regex("[^a-zA-Z0-9._-]"), "_")
@@ -269,13 +275,15 @@ class ModelRepository(
 
     suspend fun attachMmprojToModel(modelId: String, mmprojUri: Uri): Result<LocalModelEntity> =
         withContext(Dispatchers.IO) {
+            var newProjector: File? = null
             runCatching {
                 val existing = localModelDao.getById(modelId)
                     ?: throw IllegalStateException("Modelo não encontrado.")
                 val projName = resolveDisplayName(mmprojUri) ?: "mmproj.gguf"
-                val destProj = File(modelsDir, "${UUID.randomUUID().toString().take(6)}_${projName.replace(Regex("[^a-zA-Z0-9._-]"), "_")}")
+                val safeName = projName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                val destProj = File(modelsDir, "${UUID.randomUUID().toString().take(6)}_${safeName}")
+                newProjector = destProj
                 copyUriToFile(mmprojUri, destProj)
-                existing.mmprojPath?.let { runCatching { File(it).delete() } }
 
                 val budgetMb = memoryBudgetManager.state.value.userConfiguredRamLimitMb
                 val validation = ModelValidator.validateModelFile(
@@ -284,6 +292,12 @@ class ModelRepository(
                     safeRamBudgetMb = budgetMb,
                     supportsVisionFlag = true
                 )
+                if (validation.status == CompatibilityStatus.CORRUPTED_OR_INVALID ||
+                    validation.status == CompatibilityStatus.MISSING_VISION_PROJECTOR
+                ) {
+                    throw IllegalArgumentException(validation.detail)
+                }
+
                 val updated = existing.copy(
                     mmprojPath = destProj.absolutePath,
                     supportsVision = validation.supportsVision,
@@ -292,7 +306,14 @@ class ModelRepository(
                     compatibilityDetail = validation.detail
                 )
                 localModelDao.upsert(updated)
+                // Keep the previous projector until the new one is fully copied, validated and saved.
+                existing.mmprojPath?.takeIf { it != destProj.absolutePath }?.let {
+                    runCatching { File(it).delete() }
+                }
+                newProjector = null
                 updated
+            }.onFailure {
+                newProjector?.let { runCatching { it.delete() } }
             }
         }
 
