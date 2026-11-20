@@ -466,6 +466,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _calibrationState = MutableStateFlow(CalibrationUiState())
     val calibrationState: StateFlow<CalibrationUiState> = _calibrationState.asStateFlow()
     private var calibrationJob: Job? = null
+    private var benchmarkJob: Job? = null
     private var pauseRequested = false
 
     init {
