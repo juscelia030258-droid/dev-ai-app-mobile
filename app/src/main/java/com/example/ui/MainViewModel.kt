@@ -506,7 +506,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             val selectedDurations = _calibrationDurations.value
             val selectedModes = _calibrationModes.value
-            val report = StringBuilder()
+            val sacePrefs = getApplication<Application>().getSharedPreferences("sace_progress", 0)
+            val sessionNumber = sacePrefs.getInt("session_count", 0) + 1
+            sacePrefs.edit().putInt("session_count", sessionNumber).apply()
+            val isSurpriseSession = sessionNumber % 5 == 0
+            val report = StringBuilder("SACE — sessão #$sessionNumber")
             var completed = 0
             val hasUltimate = selectedModes.values.any { it == CalibrationMode.ULTIMATE }
             val total = if (hasUltimate) 0 else roles.sumOf { role ->
@@ -516,7 +520,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     CalibrationMode.ADVANCED -> 6
                     CalibrationMode.ULTIMATE -> 0
                 }
-            }
+            } + if (isSurpriseSession) roles.size else 0
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
             InferenceTaskForegroundService.startTask(getApplication())
             try {
@@ -537,12 +541,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         CalibrationMode.ADVANCED -> pool.take(6)
                         CalibrationMode.ULTIMATE -> pool
                     }
+                    val initialOffset = sacePrefs.getInt("next_${role.id}", 0).coerceAtLeast(0)
                     val roleStartedAt = System.currentTimeMillis()
                     var attempt = 0
                     do {
                         if (System.currentTimeMillis() >= roleDeadline) break
                         val cycle = attempt / selectedPool.size
-                        val basePrompt = selectedPool[attempt % selectedPool.size]
+                        val basePrompt = selectedPool[(initialOffset + attempt) % selectedPool.size]
                         val isLinuxFinalHour = role == AgentRole.CODING &&
                             mode == CalibrationMode.ULTIMATE &&
                             System.currentTimeMillis() - roleStartedAt >= 4 * 60 * 60 * 1000L
@@ -614,6 +619,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         completed++
                         attempt++
+                        sacePrefs.edit().putInt("next_${role.id}", (initialOffset + attempt) % selectedPool.size).apply()
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                         if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
                     } while (
@@ -630,6 +636,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val block = roleNotes.toString().take(1250)
                         val updated = (prior + "\n\n[AI CALIBRATION EXAMPLES]\nUse os exemplos anteriores como referências, sem copiar respostas cegamente; priorize correção e evidências na tarefa atual.\n" + block).trim()
                         dao.upsert(cfg.copy(systemPromptOverride = updated.take(5000)))
+                    }
+                }
+                if (isSurpriseSession) {
+                    report.append("\n\nTESTE SURPRESA — sessão múltipla de 5")
+                    val surprisePrompts = mapOf(
+                        AgentRole.CODING to "Desafio inédito: crie uma máquina de estados simples para um firmware ESP32 que controla um menu, salva uma configuração e lida com falha de sensor. Defina testes de aceitação.",
+                        AgentRole.REASONING to "Desafio inédito: dois relatos sobre um computador discordam sobre quando a falha começou. Monte hipóteses, diga quais dados faltam e escolha o teste mais útil sem tratar suposições como fatos.",
+                        AgentRole.VISION to "Analise a captura fornecida e transforme a organização visual em uma descrição curta de componentes, agrupamentos e alinhamentos. Informe claramente o que a imagem não permite confirmar."
+                    )
+                    for (role in roles) {
+                        _calibrationState.value = _calibrationState.value.copy(
+                            currentRole = role,
+                            currentCase = role.displayName + ": teste surpresa sem exemplos prévios",
+                            latestOutput = "",
+                            error = null
+                        )
+                        val turns = listOf(ChatTurn(
+                            role = "user",
+                            text = surprisePrompts.getValue(role),
+                            imagePath = if (role == AgentRole.VISION) visionImage else null
+                        ))
+                        var output = ""
+                        var failure: String? = null
+                        val stream = when (role) {
+                            AgentRole.VISION -> container.visionAgent.streamExecute(turns, "SACE_SURPRISE", maxTokensOverride = 220)
+                            AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "SACE_SURPRISE", maxTokensOverride = 280)
+                            AgentRole.CODING -> container.codingAgent.streamExecute(turns, "SACE_SURPRISE", maxTokensOverride = 400)
+                        }
+                        stream.collect { event ->
+                            when (event) {
+                                is InferenceStreamEvent.Token -> output += event.text
+                                is InferenceStreamEvent.Completed -> output = event.fullText.ifBlank { output }
+                                is InferenceStreamEvent.Failed -> failure = event.errorMessage
+                                else -> Unit
+                            }
+                            _calibrationState.value = _calibrationState.value.copy(
+                                latestOutput = output.takeLast(2500), error = failure
+                            )
+                        }
+                        sacePrefs.edit()
+                            .putString("surprise_${role.id}", output.take(600))
+                            .putLong("surprise_time_${role.id}", System.currentTimeMillis())
+                            .apply()
+                        report.append("\n• ").append(role.displayName)
+                            .append(if (failure == null && output.isNotBlank()) ": resposta registrada para avaliação." else ": teste não concluído — " + failure)
+                        completed++
+                        _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                     }
                 }
                 _calibrationState.value = _calibrationState.value.copy(
