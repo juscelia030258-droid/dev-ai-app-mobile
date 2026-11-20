@@ -14,8 +14,9 @@ object SaceAnswerEvaluator {
         Não elogie por educação. Não invente fatos nem presuma que código foi compilado ou executado.
         Dê nota de 0 a 100 considerando: atendimento ao pedido (30), correção técnica/lógica (35),
         evidências e reconhecimento de limites (20), clareza e ausência de repetição (15).
-        Para Vision AI, não há imagem disponível nesta revisão: avalie apenas se a resposta respeita
-        limites, separa observação de suposição e evita afirmar detalhes não comprovados.
+        Para Vision AI, examine também a imagem anexada e confira se cada observação da resposta
+        tem apoio visual. Não aceite detalhes que não estejam visíveis; se a imagem estiver ausente,
+        diga que a avaliação visual ficou limitada.
         Agente: $agent
         EXERCÍCIO:
         ${exercise.take(1800)}
