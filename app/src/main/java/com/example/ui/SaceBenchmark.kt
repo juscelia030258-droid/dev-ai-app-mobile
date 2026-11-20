@@ -38,21 +38,49 @@ object SaceBenchmarkDataset {
 
 class SaceBenchmarkStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("sace_benchmark_v1", Context.MODE_PRIVATE)
+    private val lock = Any()
 
-    fun record(result: SaceBenchmarkResult) {
-        val items = runCatching { JSONArray(prefs.getString(KEY_RESULTS, "[]")) }.getOrDefault(JSONArray())
+    fun beginRun(): Long = synchronized(lock) {
+        val nextId = maxOf(System.currentTimeMillis(), prefs.getLong(KEY_LAST_RUN_ID, 0L) + 1L)
+        val runs = readRuns()
+        runs.put(JSONObject().put("id", nextId).put("complete", false))
+        while (runs.length() > MAX_RUNS) runs.remove(0)
+        check(prefs.edit().putLong(KEY_LAST_RUN_ID, nextId).putString(KEY_RUNS, runs.toString()).commit()) {
+            "Não foi possível registrar o início do benchmark."
+        }
+        nextId
+    }
+
+    fun completeRun(runId: Long) = synchronized(lock) {
+        val runs = readRuns()
+        for (index in 0 until runs.length()) {
+            val run = runs.optJSONObject(index) ?: continue
+            if (run.optLong("id") == runId) {
+                run.put("complete", true)
+                break
+            }
+        }
+        check(prefs.edit().putString(KEY_RUNS, runs.toString()).commit()) {
+            "Não foi possível registrar a conclusão do benchmark."
+        }
+    }
+
+    fun record(result: SaceBenchmarkResult) = synchronized(lock) {
+        val items = readResults()
         items.put(JSONObject()
             .put("caseId", result.caseId).put("roleId", result.roleId).put("skill", result.skill)
             .put("completed", result.completed).put("score", result.score ?: -1)
             .put("confidence", result.confidence ?: -1).put("feedback", result.feedback.take(240))
             .put("outputPreview", result.outputPreview.take(400)).put("timestamp", result.timestamp).put("runId", result.runId))
         while (items.length() > MAX_RESULTS) items.remove(0)
-        prefs.edit().putString(KEY_RESULTS, items.toString()).commit()
+        check(prefs.edit().putString(KEY_RESULTS, items.toString()).commit()) {
+            "Não foi possível salvar o resultado do benchmark."
+        }
     }
 
-    fun results(): List<SaceBenchmarkResult> {
-        val items = runCatching { JSONArray(prefs.getString(KEY_RESULTS, "[]")) }.getOrDefault(JSONArray())
-        return (0 until items.length()).mapNotNull { index ->
+    fun results(): List<SaceBenchmarkResult> = synchronized(lock) {
+        val items = readResults()
+        (0 until items.length()).mapNotNull { index ->
             val item = items.optJSONObject(index) ?: return@mapNotNull null
             val score = item.optInt("score", -1).takeIf { it in 0..100 }
             val confidence = item.optInt("confidence", -1).takeIf { it in 0..100 }
@@ -64,14 +92,19 @@ class SaceBenchmarkStore(context: Context) {
         }
     }
 
-    fun beginRun(): Long = System.currentTimeMillis()
-
-    fun summary(): String {
-        val all = results()
-        if (all.isEmpty()) return "Nenhum benchmark executado ainda."
-        val latestRunId = all.last().runId
+    fun summary(): String = synchronized(lock) {
+        val all = resultsUnsafe()
+        val runs = readRuns()
+        val latestRun = runs.optJSONObject(runs.length() - 1)
+        val latestRunId = latestRun?.optLong("id") ?: all.lastOrNull()?.runId
+            ?: return@synchronized "Nenhum benchmark executado ainda."
         val latest = all.filter { it.runId == latestRunId }
-        val previousRunId = all.lastOrNull { it.runId != latestRunId }?.runId
+        val latestComplete = latestRun?.optBoolean("complete", false) ?: false
+        val previousRunId = (runs.length() - 2 downTo 0)
+            .asSequence()
+            .mapNotNull { runs.optJSONObject(it) }
+            .firstOrNull { it.optBoolean("complete", false) }
+            ?.optLong("id")
         val previous = previousRunId?.let { id -> all.filter { it.runId == id } }.orEmpty()
         val scored = latest.mapNotNull { it.score }
         val average = scored.takeIf { it.isNotEmpty() }?.average()?.toInt()
@@ -82,21 +115,46 @@ class SaceBenchmarkStore(context: Context) {
             val grade = result.score?.let { it.toString() + "/100 (confiança " + (result.confidence ?: 0) + "%)" } ?: "sem nota"
             "• " + label + " — " + result.skill + ": " + if (result.completed) grade else "falha de inferência"
         }
-        return buildString {
+        buildString {
             append("Benchmark v" + SaceBenchmarkDataset.VERSION + " — " + latest.size + "/" + SaceBenchmarkDataset.cases.size + " casos nesta execução.\n")
-            append(lines.joinToString("\n"))
+            if (lines.isNotEmpty()) append(lines.joinToString("\n")) else append("Nenhuma resposta registrada nesta execução.")
             if (average != null) append("\nMédia estimada: " + average + "/100 em " + scored.size + " respostas avaliadas.")
-            if (average != null && previousAverage != null) {
+            if (!latestComplete) {
+                append("\nExecução incompleta; ela não será usada como referência de comparação.")
+            } else if (average != null && previousAverage != null) {
                 val delta = average - previousAverage
-                append("\nVariação contra a execução anterior: " + (if (delta > 0) "+" else "") + delta + " pontos (anterior " + previousAverage + "/100).")
-            } else {
+                append("\nVariação contra a última execução completa: " + (if (delta > 0) "+" else "") + delta + " pontos (anterior " + previousAverage + "/100).")
+            } else if (latestComplete) {
                 append("\nExecute novamente após a calibração para obter uma comparação antes/depois.")
             }
             append("\nAs notas são estimativas de segunda passada do próprio modelo, não uma avaliação independente.")
         }
     }
+
+    private fun readResults(): JSONArray =
+        runCatching { JSONArray(prefs.getString(KEY_RESULTS, "[]")) }.getOrDefault(JSONArray())
+
+    private fun resultsUnsafe(): List<SaceBenchmarkResult> {
+        val items = readResults()
+        return (0 until items.length()).mapNotNull { index ->
+            val item = items.optJSONObject(index) ?: return@mapNotNull null
+            SaceBenchmarkResult(
+                item.optString("caseId"), item.optString("roleId"), item.optString("skill"),
+                item.optBoolean("completed"), item.optInt("score", -1).takeIf { it in 0..100 },
+                item.optInt("confidence", -1).takeIf { it in 0..100 }, item.optString("feedback"),
+                item.optString("outputPreview"), item.optLong("timestamp"), item.optLong("runId", item.optLong("timestamp"))
+            )
+        }
+    }
+
+    private fun readRuns(): JSONArray =
+        runCatching { JSONArray(prefs.getString(KEY_RUNS, "[]")) }.getOrDefault(JSONArray())
+
     companion object {
         private const val KEY_RESULTS = "results"
+        private const val KEY_RUNS = "runs"
+        private const val KEY_LAST_RUN_ID = "last_run_id"
         private const val MAX_RESULTS = 90
+        private const val MAX_RUNS = 30
     }
 }
