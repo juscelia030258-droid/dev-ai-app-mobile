@@ -15,7 +15,8 @@ data class SaceCheckpoint(
     val startedAt: Long,
     val sessionNumber: Int,
     val selectedModes: Map<String, String> = emptyMap(),
-    val selectedDurations: Map<String, Int> = emptyMap()
+    val selectedDurations: Map<String, Int> = emptyMap(),
+    val elapsedMs: Long = 0L
 )
 
 class SaceProgressStore(context: Context) {
@@ -24,7 +25,7 @@ class SaceProgressStore(context: Context) {
 
     fun beginSession(): Int = synchronized(lock) {
         val next = prefs.getInt(KEY_SESSION_COUNT, 0) + 1
-        prefs.edit().putInt(KEY_SESSION_COUNT, next).apply()
+        check(prefs.edit().putInt(KEY_SESSION_COUNT, next).commit()) { "Não foi possível salvar o número da sessão SACE." }
         next
     }
 
@@ -131,7 +132,8 @@ class SaceProgressStore(context: Context) {
         startedAt: Long,
         sessionNumber: Int,
         selectedModes: Map<String, String> = emptyMap(),
-        selectedDurations: Map<String, Int> = emptyMap()
+        selectedDurations: Map<String, Int> = emptyMap(),
+        elapsedMs: Long = 0L
     ) {
         val modesJson = JSONObject()
         selectedModes.forEach { (role, value) -> modesJson.put(role, value) }
@@ -145,6 +147,7 @@ class SaceProgressStore(context: Context) {
             .put("session", sessionNumber)
             .put("selectedModes", modesJson)
             .put("selectedDurations", durationsJson)
+            .put("elapsedMs", elapsedMs.coerceAtLeast(0L))
             .put("savedAt", System.currentTimeMillis())
         // This small checkpoint must reach disk before an expensive inference starts.
         check(prefs.edit().putString(KEY_CHECKPOINT, checkpoint.toString()).commit()) {
@@ -182,7 +185,8 @@ class SaceProgressStore(context: Context) {
                         }
                     }
                 }
-            }.orEmpty()
+            }.orEmpty(),
+            elapsedMs = json.optLong("elapsedMs", (System.currentTimeMillis() - json.optLong("startedAt", System.currentTimeMillis())).coerceAtLeast(0L)).coerceAtLeast(0L)
         )
     }
 
