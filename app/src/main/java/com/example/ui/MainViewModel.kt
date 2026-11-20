@@ -546,13 +546,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val isLinuxFinalHour = role == AgentRole.CODING &&
                             mode == CalibrationMode.ULTIMATE &&
                             System.currentTimeMillis() - roleStartedAt >= 4 * 60 * 60 * 1000L
+                        val ultimateHour = ((System.currentTimeMillis() - roleStartedAt) / 3_600_000L).toInt().coerceIn(0, 4)
+                        val reasoningStage = listOf(
+                            "ETAPA 1/5 — lógica, dedução, padrões e hipóteses.",
+                            "ETAPA 2/5 — tecnologia: hardware, CPU, RAM, redes e sistemas operacionais.",
+                            "ETAPA 3/5 — investigação de falhas e análise de sistemas.",
+                            "ETAPA 4/5 — colaboração: dividir tarefas e revisar resultados da Coding AI e Vision AI sem concordar automaticamente.",
+                            "ETAPA 5/5 — desafio final: analisar um projeto complexo, apontar incertezas e montar um plano verificável."
+                        )
+                        val visionStage = listOf(
+                            "ETAPA 1/5 — reconhecer elementos e componentes que estejam realmente visíveis.",
+                            "ETAPA 2/5 — analisar interfaces, hierarquia e organização.",
+                            "ETAPA 3/5 — leitura de texto legível e relações espaciais; não adivinhe conteúdo ilegível.",
+                            "ETAPA 4/5 — comparar regiões e identificar erros visuais.",
+                            "ETAPA 5/5 — desafio final: produzir uma especificação visual clara para a Coding AI."
+                        )
+                        val stagePrefix = when {
+                            mode != CalibrationMode.ULTIMATE -> ""
+                            role == AgentRole.REASONING -> reasoningStage[ultimateHour] + " "
+                            role == AgentRole.VISION -> visionStage[ultimateHour] + " "
+                            else -> ""
+                        }
                         val prompt = if (isLinuxFinalHour) {
                             "DESAFIO FINAL LINUX: use somente o projeto de laboratório e os arquivos que forem fornecidos nesta tarefa. " +
                                 "Mapeie a estrutura, analise scripts, serviços, permissões e dependências; encontre erros; proponha melhorias; " +
                                 "reescreva apenas módulos selecionados e crie testes. Não afirme que analisou uma distribuição inteira nem que executou comandos. " +
                                 "Tarefa: " + basePrompt
-                        } else if (cycle == 0) basePrompt else {
-                            basePrompt + "\n\nCrie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
+                        } else if (cycle == 0) stagePrefix + basePrompt else {
+                            stagePrefix + basePrompt + "\n\nCrie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
                         }
                         _calibrationState.value = _calibrationState.value.copy(
                             currentCase = role.displayName + " (" + mode.title + "): exercício " + (attempt + 1) +
@@ -595,7 +616,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         attempt++
                         _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
                         if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
-                    } while (mode == CalibrationMode.ULTIMATE && System.currentTimeMillis() < roleDeadline)
+                    } while (
+                        (mode == CalibrationMode.ULTIMATE && System.currentTimeMillis() < roleDeadline) ||
+                        (mode != CalibrationMode.ULTIMATE && attempt < selectedPool.size)
+                    )
                     report.append("\n• ").append(role.displayName).append(": ")
                         .append(attempt).append(" tentativas nesta sessão.")
 
