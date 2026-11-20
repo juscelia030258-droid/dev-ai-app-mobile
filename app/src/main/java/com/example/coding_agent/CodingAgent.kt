@@ -98,6 +98,7 @@ class CodingAgent(
         val terminalGuidanceStart = DEFAULT_SYSTEM_PROMPT.indexOf("TERMINAL UNIVERSAL — FLUXO DE DESENVOLVIMENTO")
         val sysPrompt = when {
             customPrompt == null -> DEFAULT_SYSTEM_PROMPT
+            customPrompt.contains("[AI CALIBRATION EXAMPLES]") -> customPrompt + "\n\n" + DEFAULT_SYSTEM_PROMPT
             terminalGuidanceStart >= 0 -> customPrompt + "\n\n" + DEFAULT_SYSTEM_PROMPT.substring(terminalGuidanceStart)
             else -> customPrompt + "\n\n" + "TERMINAL UNIVERSAL: identifique Windows/PowerShell/CMD, macOS/zsh/bash ou Linux/bash; gere comandos específicos do shell, indique diretório e resultado esperado, nunca alegue execução sem evidência e peça confirmação antes de operações destrutivas ou alterações do sistema."
         }
