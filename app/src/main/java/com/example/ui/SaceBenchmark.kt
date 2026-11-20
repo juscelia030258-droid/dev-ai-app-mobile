@@ -8,7 +8,7 @@ import org.json.JSONObject
 data class SaceBenchmarkCase(val id: String, val roleId: String, val skill: String, val prompt: String)
 data class SaceBenchmarkResult(
     val caseId: String, val roleId: String, val skill: String, val completed: Boolean,
-    val score: Int?, val confidence: Int?, val feedback: String, val outputPreview: String, val timestamp: Long
+    val score: Int?, val confidence: Int?, val feedback: String, val outputPreview: String, val timestamp: Long, val runId: Long = timestamp
 )
 
 object SaceBenchmarkDataset {
