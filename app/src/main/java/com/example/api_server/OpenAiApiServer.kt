@@ -28,6 +28,7 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
 import io.ktor.server.request.receiveChannel
 import io.ktor.utils.io.readAvailable
+import io.ktor.utils.io.awaitContent
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
@@ -349,7 +350,12 @@ class OpenAiApiServer(
             if (remainingWithOverflowByte <= 0) return null
             val count = channel.readAvailable(buffer, 0, minOf(buffer.size, remainingWithOverflowByte))
             if (count == -1) return output.toByteArray()
-            if (count == 0) continue
+            if (count == 0) {
+                // No bytes are currently buffered; suspend until data arrives or EOF is reached.
+                // Avoid a tight CPU loop while a chunked client uploads the request slowly.
+                channel.awaitContent(1)
+                continue
+            }
             output.write(buffer, 0, count)
             if (output.size() > maxBytes) return null
         }
