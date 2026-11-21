@@ -450,12 +450,9 @@ class OpenAiApiServer(
             return
         }
 
-        val parsedResult = parseMessagesWithOptionalImages(req.messages)
-        val chatTurns = parsedResult.first
-        val tempImageFiles = parsedResult.second
-
+        // Reserve capacity before decoding image payloads or creating temporary files.
+        // JSON, model permissions and message presence have already been validated above.
         if (!chatRequestSemaphore.tryAcquire()) {
-            tempImageFiles.forEach { runCatching { it.delete() } }
             respondOpenAiError(
                 call,
                 HttpStatusCode.ServiceUnavailable,
@@ -468,8 +465,13 @@ class OpenAiApiServer(
 
         activeConnectionsCounter.incrementAndGet()
         syncCounters()
+        var tempImageFiles: List<File> = emptyList()
 
         try {
+            val parsedResult = parseMessagesWithOptionalImages(req.messages)
+            val chatTurns = parsedResult.first
+            tempImageFiles = parsedResult.second
+
             val completionId = "chatcmpl-${UUID.randomUUID().toString().take(12)}"
             val createdEpoch = System.currentTimeMillis() / 1000L
 
