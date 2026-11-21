@@ -33,7 +33,7 @@ class AppContainer(context: Context) {
         appContext,
         AppDatabase::class.java,
         "local_dev_ai_db"
-    ).fallbackToDestructiveMigration(true).build()
+    ).build()
 
     val deviceProfiler = DeviceProfiler(appContext)
     val settingsRepository = SettingsRepository(appContext)

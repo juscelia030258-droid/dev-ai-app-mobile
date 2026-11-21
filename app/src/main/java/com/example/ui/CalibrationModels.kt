@@ -19,5 +19,9 @@ data class CalibrationUiState(
     val error: String? = null,
     val isPaused: Boolean = false,
     val canResume: Boolean = false,
-    val thermalMessage: String? = null
+    val thermalMessage: String? = null,
+    val isBenchmarkRunning: Boolean = false,
+    val benchmarkProgress: Int = 0,
+    val benchmarkReport: String = "",
+    val benchmarkError: String? = null
 )

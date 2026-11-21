@@ -93,7 +93,7 @@ data class DeviceHardwareProfile(
     val availableRamMb: Long,
     val modelSafeBudgetMb: Long,
     val systemMemoryPressureLabel: String,
-    val processRssMb: Long,
+    val processPssMb: Long,
     val freeStorageMb: Long,
     val totalStorageMb: Long,
     val thermalStatusLabel: String

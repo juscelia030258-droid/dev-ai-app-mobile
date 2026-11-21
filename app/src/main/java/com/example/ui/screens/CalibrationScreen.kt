@@ -36,7 +36,8 @@ fun CalibrationScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onResume: () -> Unit,
-    onDiscardCheckpoint: () -> Unit
+    onDiscardCheckpoint: () -> Unit,
+    onBenchmark: () -> Unit
 ) {
     val agents = listOf(
         Triple(AgentRole.CODING, "Firmware, menus funcionais, configurações, Kotlin, Python, depuração e Linux no Ultimate.", 1..120),
@@ -72,11 +73,11 @@ fun CalibrationScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         CalibrationMode.entries.forEach { option ->
                             if (mode == option) {
-                                Button(onClick = { onModeChange(role, option) }, enabled = !state.isRunning) {
+                                Button(onClick = { onModeChange(role, option) }, enabled = !state.isRunning && !state.isBenchmarkRunning) {
                                     Text(option.title)
                                 }
                             } else {
-                                OutlinedButton(onClick = { onModeChange(role, option) }, enabled = !state.isRunning) {
+                                OutlinedButton(onClick = { onModeChange(role, option) }, enabled = !state.isRunning && !state.isBenchmarkRunning) {
                                     Text(option.title)
                                 }
                             }
@@ -91,12 +92,22 @@ fun CalibrationScreen(
                             onValueChange = { onDurationChange(role, it.toInt().coerceIn(range.first, range.last)) },
                             valueRange = range.first.toFloat()..range.last.toFloat(),
                             steps = range.last - range.first - 1,
-                            enabled = !state.isRunning
+                            enabled = !state.isRunning && !state.isBenchmarkRunning
                         )
                         Text("De " + range.first + " a " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
+        }
+        if (state.isBenchmarkRunning) {
+            Text("Benchmark separado — " + state.benchmarkProgress + " / 9 casos", fontWeight = FontWeight.SemiBold)
+            LinearProgressIndicator(progress = { (state.benchmarkProgress.toFloat() / 9f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            state.thermalMessage?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        state.benchmarkError?.let {
+            Text("Benchmark: " + it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
         if (state.isRunning) {
             Text(state.currentCase, fontWeight = FontWeight.SemiBold)
@@ -119,7 +130,7 @@ fun CalibrationScreen(
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
             OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Pausar e salvar progresso") }
-        } else {
+        } else if (!state.isBenchmarkRunning) {
             if (state.canResume) {
                 Text(
                     state.currentCase.ifBlank { "Existe uma sessão SACE que pode ser retomada." },
@@ -133,6 +144,15 @@ fun CalibrationScreen(
                 Text(if (state.canResume) "Descarte a sessão para iniciar outra" else "Iniciar calibração completa")
             }
         }
+        if (state.benchmarkReport.isNotBlank()) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp)) {
+                    Text("Resultado do benchmark", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(state.benchmarkReport, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         state.error?.let { Text("Aviso: " + it, color = MaterialTheme.colorScheme.error) }
         if (state.report.isNotBlank()) {
             Card(Modifier.fillMaxWidth()) {
@@ -143,6 +163,7 @@ fun CalibrationScreen(
                 }
             }
         }
+        OutlinedButton(onClick = onBenchmark, modifier = Modifier.fillMaxWidth(), enabled = !state.isRunning && !state.isBenchmarkRunning) { Text("Executar benchmark (9 testes)") }
         Text(
             "O modo Ultimate reserva 5 horas para cada IA selecionada. O tempo é um limite, não uma garantia de que o Android manterá o processo ativo. A calibração usa exemplos e instruções; não altera os pesos dos modelos.",
             style = MaterialTheme.typography.labelSmall,

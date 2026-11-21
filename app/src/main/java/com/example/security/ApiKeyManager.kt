@@ -211,9 +211,9 @@ class ApiKeyManager(
         val hash = sha256Hex(token)
         val record = apiKeyDao.findByHash(hash) ?: return null
         if (!record.isActive) return null
+        val perm = runCatching { KeyPermission.valueOf(record.permissions) }.getOrNull()
+            ?: return null
         apiKeyDao.recordAccess(record.id, System.currentTimeMillis(), remoteIp)
-        val perm = runCatching { KeyPermission.valueOf(record.permissions) }
-            .getOrDefault(KeyPermission.ALL_AGENTS)
         return AuthenticatedKeyResult(record, perm)
     }
 

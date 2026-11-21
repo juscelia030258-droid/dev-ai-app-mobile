@@ -26,7 +26,8 @@ import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
-import io.ktor.server.request.receiveText
+import io.ktor.server.request.receiveChannel
+import io.ktor.utils.io.readAvailable
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
@@ -35,6 +36,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.options
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,6 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -83,6 +86,8 @@ class OpenAiApiServer(
     private val requestLogDao: ApiRequestLogDao,
     private val settingsRepository: SettingsRepository
 ) {
+    private val maxRequestBodyBytes = 15_000_000
+
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -93,6 +98,7 @@ class OpenAiApiServer(
     private val activeConnectionsCounter = AtomicInteger(0)
     private val totalRequestsCounter = AtomicInteger(0)
     private val rateWindowMap = ConcurrentHashMap<String, MutableList<Long>>()
+    private val chatRequestSemaphore = Semaphore(permits = 2)
 
     private val _status = MutableStateFlow(ApiServerStatus())
     val status: StateFlow<ApiServerStatus> = _status.asStateFlow()
@@ -329,18 +335,68 @@ class OpenAiApiServer(
     }
 
     private suspend fun handleChatCompletions(call: ApplicationCall) {
+        // Authentication and request validation happen before consuming an inference slot.
+        handleChatCompletionsWithSlot(call)
+    }
+
+    private suspend fun readBodyAtMost(call: ApplicationCall, maxBytes: Int): ByteArray? {
+        val channel = call.receiveChannel()
+        val output = java.io.ByteArrayOutputStream(minOf(maxBytes, 8 * 1024))
+        val buffer = ByteArray(8 * 1024)
+        while (true) {
+            val remainingWithOverflowByte = maxBytes - output.size() + 1
+            if (remainingWithOverflowByte <= 0) return null
+            val count = channel.readAvailable(buffer, 0, minOf(buffer.size, remainingWithOverflowByte))
+            if (count == -1) return output.toByteArray()
+            if (count == 0) continue
+            output.write(buffer, 0, count)
+            if (output.size() > maxBytes) return null
+        }
+    }
+
+    private suspend fun handleChatCompletionsWithSlot(call: ApplicationCall) {
         val startMs = System.currentTimeMillis()
         val remoteIp = call.request.origin.remoteHost
 
         // Authenticate LAN origin, Bearer token, blocked device, and rate limit BEFORE reading body
         val auth = authenticateAndValidate(call, requestedModel = null) ?: return
 
-        val rawBody = runCatching { call.receiveText() }.getOrElse { "" }
-        if (rawBody.isBlank() || rawBody.length > 15_000_000) {
+        val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        if (declaredLength != null && declaredLength > maxRequestBodyBytes.toLong()) {
+            respondOpenAiError(
+                call,
+                HttpStatusCode(413, "Payload Too Large"),
+                "Corpo JSON excede o limite de 15 MB.",
+                "invalid_request_error",
+                "body_too_large"
+            )
+            return
+        }
+
+        // Enforce the cap while streaming, including chunked requests without Content-Length.
+        val bodyBytes = try {
+            readBodyAtMost(call, maxRequestBodyBytes)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+        if (bodyBytes == null) {
+            respondOpenAiError(
+                call,
+                HttpStatusCode(413, "Payload Too Large"),
+                "Corpo JSON excede o limite de 15 MB.",
+                "invalid_request_error",
+                "body_too_large"
+            )
+            return
+        }
+        val rawBody = bodyBytes.toString(Charsets.UTF_8)
+        if (rawBody.isBlank()) {
             respondOpenAiError(
                 call,
                 HttpStatusCode.BadRequest,
-                "Corpo JSON vazio ou excede o limite de 15 MB.",
+                "Corpo JSON vazio.",
                 "invalid_request_error",
                 "invalid_body"
             )
@@ -396,6 +452,18 @@ class OpenAiApiServer(
         val parsedResult = parseMessagesWithOptionalImages(req.messages)
         val chatTurns = parsedResult.first
         val tempImageFiles = parsedResult.second
+
+        if (!chatRequestSemaphore.tryAcquire()) {
+            tempImageFiles.forEach { runCatching { it.delete() } }
+            respondOpenAiError(
+                call,
+                HttpStatusCode.ServiceUnavailable,
+                "O servidor já está processando duas requisições. Aguarde uma delas terminar e tente novamente.",
+                "server_busy",
+                "concurrency_limit"
+            )
+            return
+        }
 
         activeConnectionsCounter.incrementAndGet()
         syncCounters()
@@ -628,6 +696,7 @@ class OpenAiApiServer(
             tempImageFiles.forEach { runCatching { it.delete() } }
             activeConnectionsCounter.decrementAndGet()
             syncCounters()
+            chatRequestSemaphore.release()
         }
     }
 
