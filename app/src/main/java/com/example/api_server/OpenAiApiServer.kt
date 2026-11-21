@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -93,6 +94,7 @@ class OpenAiApiServer(
     private val activeConnectionsCounter = AtomicInteger(0)
     private val totalRequestsCounter = AtomicInteger(0)
     private val rateWindowMap = ConcurrentHashMap<String, MutableList<Long>>()
+    private val chatRequestSemaphore = Semaphore(permits = 2)
 
     private val _status = MutableStateFlow(ApiServerStatus())
     val status: StateFlow<ApiServerStatus> = _status.asStateFlow()
@@ -329,11 +331,41 @@ class OpenAiApiServer(
     }
 
     private suspend fun handleChatCompletions(call: ApplicationCall) {
+        if (!chatRequestSemaphore.tryAcquire()) {
+            respondOpenAiError(
+                call,
+                HttpStatusCode.ServiceUnavailable,
+                "O servidor já está processando duas requisições. Aguarde uma delas terminar e tente novamente.",
+                "server_busy",
+                "concurrency_limit"
+            )
+            return
+        }
+        try {
+            handleChatCompletionsWithSlot(call)
+        } finally {
+            chatRequestSemaphore.release()
+        }
+    }
+
+    private suspend fun handleChatCompletionsWithSlot(call: ApplicationCall) {
         val startMs = System.currentTimeMillis()
         val remoteIp = call.request.origin.remoteHost
 
         // Authenticate LAN origin, Bearer token, blocked device, and rate limit BEFORE reading body
         val auth = authenticateAndValidate(call, requestedModel = null) ?: return
+
+        val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        if (declaredLength != null && declaredLength > 15_000_000L) {
+            respondOpenAiError(
+                call,
+                HttpStatusCode.PayloadTooLarge,
+                "Corpo JSON excede o limite de 15 MB.",
+                "invalid_request_error",
+                "body_too_large"
+            )
+            return
+        }
 
         val rawBody = runCatching { call.receiveText() }.getOrElse { "" }
         if (rawBody.isBlank() || rawBody.length > 15_000_000) {
