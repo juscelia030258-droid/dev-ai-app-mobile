@@ -87,6 +87,7 @@ class OpenAiApiServer(
     private val settingsRepository: SettingsRepository
 ) {
     private val maxRequestBodyBytes = 15_000_000
+    private val streamEventBufferCapacity = 64
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -565,7 +566,9 @@ class OpenAiApiServer(
 
             if (req.stream) {
                 coroutineScope {
-                    val eventChannel = Channel<InferenceStreamEvent>(Channel.UNLIMITED)
+                    // Bounded buffering applies backpressure when a client reads SSE slowly.
+                    // This prevents generated tokens from accumulating without a memory limit.
+                    val eventChannel = Channel<InferenceStreamEvent>(capacity = streamEventBufferCapacity)
                     val producerJob = launch {
                         try {
                             eventFlow.collect { eventChannel.send(it) }
