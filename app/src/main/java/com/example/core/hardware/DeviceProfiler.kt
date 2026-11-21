@@ -46,10 +46,11 @@ class DeviceProfiler(private val context: Context) {
             else -> "Normal"
         }
 
-        val nativeHeapMb = Debug.getNativeHeapAllocatedSize() / (1024L * 1024L)
-        val runtime = Runtime.getRuntime()
-        val jvmUsedMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024L * 1024L)
-        val processRssMb = nativeHeapMb + jvmUsedMb
+        // PSS includes the process's proportional share of mapped/native model memory.
+        // JVM + native heap counters miss mmap-backed GGUF weights.
+        val debugMemoryInfo = Debug.MemoryInfo()
+        Debug.getMemoryInfo(debugMemoryInfo)
+        val processPssMb = debugMemoryInfo.totalPss.toLong() / 1024L
 
         val statFs = StatFs(context.filesDir.absolutePath)
         val freeStorageMb = (statFs.availableBlocksLong * statFs.blockSizeLong) / (1024L * 1024L)
@@ -87,7 +88,7 @@ class DeviceProfiler(private val context: Context) {
             availableRamMb = availRamMb,
             modelSafeBudgetMb = finalModelBudgetMb,
             systemMemoryPressureLabel = systemMemoryPressureLabel,
-            processRssMb = processRssMb,
+            processPssMb = processPssMb,
             freeStorageMb = freeStorageMb,
             totalStorageMb = totalStorageMb,
             thermalStatusLabel = thermalLabel
