@@ -26,7 +26,6 @@ import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
-import io.ktor.server.request.receiveText
 import io.ktor.server.request.receiveChannel
 import io.ktor.utils.io.readAvailable
 import io.ktor.server.response.header
@@ -86,7 +85,7 @@ class OpenAiApiServer(
     private val requestLogDao: ApiRequestLogDao,
     private val settingsRepository: SettingsRepository
 ) {
-    private val MAX_REQUEST_BODY_BYTES = 15_000_000
+    private val maxRequestBodyBytes = 15_000_000
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -387,7 +386,7 @@ class OpenAiApiServer(
         }
 
         // Enforce the cap while streaming, including chunked requests without Content-Length.
-        val bodyBytes = runCatching { readBodyAtMost(call, MAX_REQUEST_BODY_BYTES) }.getOrElse { null }
+        val bodyBytes = runCatching { readBodyAtMost(call, maxRequestBodyBytes) }.getOrElse { null }
         if (bodyBytes == null) {
             respondOpenAiError(
                 call,
