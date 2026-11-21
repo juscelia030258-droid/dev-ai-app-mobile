@@ -27,6 +27,8 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
 import io.ktor.server.request.receiveText
+import io.ktor.server.request.receiveChannel
+import io.ktor.utils.io.readAvailable
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
@@ -84,6 +86,8 @@ class OpenAiApiServer(
     private val requestLogDao: ApiRequestLogDao,
     private val settingsRepository: SettingsRepository
 ) {
+    private val MAX_REQUEST_BODY_BYTES = 15_000_000
+
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -348,6 +352,21 @@ class OpenAiApiServer(
         }
     }
 
+    private suspend fun readBodyAtMost(call: ApplicationCall, maxBytes: Int): ByteArray? {
+        val channel = call.receiveChannel()
+        val output = java.io.ByteArrayOutputStream(minOf(maxBytes, 8 * 1024))
+        val buffer = ByteArray(8 * 1024)
+        while (true) {
+            val remainingWithOverflowByte = maxBytes - output.size() + 1
+            if (remainingWithOverflowByte <= 0) return null
+            val count = channel.readAvailable(buffer, 0, minOf(buffer.size, remainingWithOverflowByte))
+            if (count == -1) return output.toByteArray()
+            if (count == 0) continue
+            output.write(buffer, 0, count)
+            if (output.size() > maxBytes) return null
+        }
+    }
+
     private suspend fun handleChatCompletionsWithSlot(call: ApplicationCall) {
         val startMs = System.currentTimeMillis()
         val remoteIp = call.request.origin.remoteHost
@@ -367,12 +386,24 @@ class OpenAiApiServer(
             return
         }
 
-        val rawBody = runCatching { call.receiveText() }.getOrElse { "" }
-        if (rawBody.isBlank() || rawBody.length > 15_000_000) {
+        // Enforce the cap while streaming, including chunked requests without Content-Length.
+        val bodyBytes = runCatching { readBodyAtMost(call, MAX_REQUEST_BODY_BYTES) }.getOrElse { null }
+        if (bodyBytes == null) {
+            respondOpenAiError(
+                call,
+                HttpStatusCode(413, "Payload Too Large"),
+                "Corpo JSON excede o limite de 15 MB.",
+                "invalid_request_error",
+                "body_too_large"
+            )
+            return
+        }
+        val rawBody = bodyBytes.toString(Charsets.UTF_8)
+        if (rawBody.isBlank()) {
             respondOpenAiError(
                 call,
                 HttpStatusCode.BadRequest,
-                "Corpo JSON vazio ou excede o limite de 15 MB.",
+                "Corpo JSON vazio.",
                 "invalid_request_error",
                 "invalid_body"
             )
