@@ -36,6 +36,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.options
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -334,21 +335,8 @@ class OpenAiApiServer(
     }
 
     private suspend fun handleChatCompletions(call: ApplicationCall) {
-        if (!chatRequestSemaphore.tryAcquire()) {
-            respondOpenAiError(
-                call,
-                HttpStatusCode.ServiceUnavailable,
-                "O servidor já está processando duas requisições. Aguarde uma delas terminar e tente novamente.",
-                "server_busy",
-                "concurrency_limit"
-            )
-            return
-        }
-        try {
-            handleChatCompletionsWithSlot(call)
-        } finally {
-            chatRequestSemaphore.release()
-        }
+        // Authentication and request validation happen before consuming an inference slot.
+        handleChatCompletionsWithSlot(call)
     }
 
     private suspend fun readBodyAtMost(call: ApplicationCall, maxBytes: Int): ByteArray? {
@@ -374,7 +362,7 @@ class OpenAiApiServer(
         val auth = authenticateAndValidate(call, requestedModel = null) ?: return
 
         val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-        if (declaredLength != null && declaredLength > 15_000_000L) {
+        if (declaredLength != null && declaredLength > maxRequestBodyBytes.toLong()) {
             respondOpenAiError(
                 call,
                 HttpStatusCode(413, "Payload Too Large"),
@@ -386,7 +374,13 @@ class OpenAiApiServer(
         }
 
         // Enforce the cap while streaming, including chunked requests without Content-Length.
-        val bodyBytes = runCatching { readBodyAtMost(call, maxRequestBodyBytes) }.getOrElse { null }
+        val bodyBytes = try {
+            readBodyAtMost(call, maxRequestBodyBytes)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
         if (bodyBytes == null) {
             respondOpenAiError(
                 call,
@@ -458,6 +452,18 @@ class OpenAiApiServer(
         val parsedResult = parseMessagesWithOptionalImages(req.messages)
         val chatTurns = parsedResult.first
         val tempImageFiles = parsedResult.second
+
+        if (!chatRequestSemaphore.tryAcquire()) {
+            tempImageFiles.forEach { runCatching { it.delete() } }
+            respondOpenAiError(
+                call,
+                HttpStatusCode.ServiceUnavailable,
+                "O servidor já está processando duas requisições. Aguarde uma delas terminar e tente novamente.",
+                "server_busy",
+                "concurrency_limit"
+            )
+            return
+        }
 
         activeConnectionsCounter.incrementAndGet()
         syncCounters()
@@ -690,6 +696,7 @@ class OpenAiApiServer(
             tempImageFiles.forEach { runCatching { it.delete() } }
             activeConnectionsCounter.decrementAndGet()
             syncCounters()
+            chatRequestSemaphore.release()
         }
     }
 
