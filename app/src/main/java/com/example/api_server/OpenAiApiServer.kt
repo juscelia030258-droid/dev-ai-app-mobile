@@ -359,7 +359,7 @@ class OpenAiApiServer(
         if (declaredLength != null && declaredLength > 15_000_000L) {
             respondOpenAiError(
                 call,
-                HttpStatusCode.PayloadTooLarge,
+                HttpStatusCode(413, "Payload Too Large"),
                 "Corpo JSON excede o limite de 15 MB.",
                 "invalid_request_error",
                 "body_too_large"
