@@ -28,7 +28,6 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
 import io.ktor.server.request.receiveChannel
 import io.ktor.utils.io.readAvailable
-import io.ktor.utils.io.awaitContent
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
