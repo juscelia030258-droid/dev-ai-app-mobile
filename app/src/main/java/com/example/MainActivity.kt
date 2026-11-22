@@ -410,6 +410,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             isRunningDiagnostics = isRunningDiagnostics,
                             onUpdatePort = viewModel::updateServerPort,
                             onUpdateRamLimit = viewModel::updateRamLimitMb,
+                            onUpdateSystemRamReserve = viewModel::updateSystemRamReserveMb,
                             onUpdateLanOnly = viewModel::updateLanOnlyMode,
                             onUpdateRateLimit = viewModel::updateRateLimit,
                             onUpdateMaxRevisions = viewModel::updateMaxRevisions,
