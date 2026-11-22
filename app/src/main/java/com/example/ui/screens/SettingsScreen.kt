@@ -68,6 +68,7 @@ fun SettingsScreen(
     isRunningDiagnostics: Boolean,
     onUpdatePort: (Int) -> Unit,
     onUpdateRamLimit: (Long) -> Unit,
+    onUpdateSystemRamReserve: (Long) -> Unit,
     onUpdateLanOnly: (Boolean) -> Unit,
     onUpdateRateLimit: (Int) -> Unit,
     onUpdateMaxRevisions: (Int) -> Unit,
@@ -124,6 +125,15 @@ fun SettingsScreen(
                     helperText = "As IAs são carregadas uma por vez. Ao trocar de agente, o modelo anterior é descarregado; o limite não soma a RAM dos três modelos. O teto do modelo é separado da RAM livre do Android; a pressão do sistema é verificada à parte antes de carregar."
                 )
 
+                SettingsSliderRow(
+                    label = "Reserva mínima para Android",
+                    valueText = "${settings.systemRamReserveMb} MB",
+                    value = settings.systemRamReserveMb.toFloat(),
+                    onValueChange = { onUpdateSystemRamReserve((it / 50f).roundToInt() * 50L) },
+                    valueRange = 200f..1024f,
+                    helperText = "Reserva de memória que o app tenta manter disponível para o Android. 200 MB não é o limite total da IA: os pesos e o contexto do modelo ainda precisam caber na RAM livre real. O Android continua podendo encerrar processos se faltar memória."
+                )
+
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(12.dp))
@@ -155,7 +165,7 @@ fun SettingsScreen(
             ObsidianCard {
                 SettingsToggleRow(
                     title = "Proteção térmica automática",
-                    subtitle = "Status atual: ${memoryState.profile.thermalStatusLabel}. Bloqueia novas inferências em nível severo ou crítico.",
+                    subtitle = "Status atual: ${memoryState.profile.thermalStatusLabel}. Quando ativada, o app pausa novas inferências em nível severo/crítico. Desativada, o Android ainda pode reduzir desempenho ou interromper a carga para proteger o aparelho.",
                     checked = settings.thermalGuardEnabled,
                     onCheckedChange = onUpdateThermalGuard,
                     switchModifier = Modifier.testTag("thermal_guard_switch")
