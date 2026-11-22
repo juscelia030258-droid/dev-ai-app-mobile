@@ -40,9 +40,9 @@ fun CalibrationScreen(
     onBenchmark: () -> Unit
 ) {
     val agents = listOf(
-        Triple(AgentRole.CODING, "Firmware, menus funcionais, configurações, Kotlin, Python, depuração e Linux no Ultimate.", 1..120),
-        Triple(AgentRole.REASONING, "Lógica, tecnologia, investigação, planejamento e colaboração entre agentes.", 1..90),
-        Triple(AgentRole.VISION, "Interfaces, leitura visual, relações espaciais e revisão de imagens.", 1..60)
+        Triple(AgentRole.CODING, "Firmware, menus funcionais, configurações, Kotlin, Python, depuração e Linux no Ultimate.", 10..120),
+        Triple(AgentRole.REASONING, "Lógica, tecnologia, investigação, planejamento e colaboração entre agentes.", 10..90),
+        Triple(AgentRole.VISION, "Interfaces, leitura visual, relações espaciais e revisão de imagens.", 10..60)
     )
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -50,7 +50,7 @@ fun CalibrationScreen(
     ) {
         Text("AI Calibration Lab", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "Escolha o tempo máximo de cada agente. O aplicativo calibra um modelo por vez e encerra cada etapa ao concluir os exercícios ou atingir o limite escolhido.",
+            "Escolha o tempo de treinamento de cada agente (mínimo de 10 minutos). Os exercícios se repetem até o tempo ser cumprido; a calibração não termina só porque acabou a primeira lista.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -89,12 +89,12 @@ fun CalibrationScreen(
                     } else {
                         Slider(
                             value = minutes.toFloat(),
-                            onValueChange = { onDurationChange(role, it.toInt().coerceIn(range.first, range.last)) },
+                            onValueChange = { onDurationChange(role, it.toInt().coerceIn(10, range.last)) },
                             valueRange = range.first.toFloat()..range.last.toFloat(),
                             steps = range.last - range.first - 1,
                             enabled = !state.isRunning && !state.isBenchmarkRunning
                         )
-                        Text("De " + range.first + " a " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Mínimo de 10 minutos • até " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -119,7 +119,12 @@ fun CalibrationScreen(
                 Text(state.completedCases.toString() + " / " + state.totalCases + " exercícios")
             } else {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                Text(state.completedCases.toString() + " exercícios concluídos — sessão Ultimate")
+                Text(state.completedCases.toString() + " exercícios concluídos • treinamento por tempo")
+            }
+            if (state.targetDurationMs > 0L) {
+                val elapsedMinutes = state.currentElapsedMs / 60_000L
+                val targetMinutes = state.targetDurationMs / 60_000L
+                Text("Tempo de treinamento: $elapsedMinutes / $targetMinutes min", style = MaterialTheme.typography.labelMedium)
             }
             if (state.latestOutput.isNotBlank()) {
                 Card(Modifier.fillMaxWidth()) {
@@ -165,7 +170,7 @@ fun CalibrationScreen(
         }
         OutlinedButton(onClick = onBenchmark, modifier = Modifier.fillMaxWidth(), enabled = !state.isRunning && !state.isBenchmarkRunning) { Text("Executar benchmark (9 testes)") }
         Text(
-            "O modo Ultimate reserva 5 horas para cada IA selecionada. O tempo é um limite, não uma garantia de que o Android manterá o processo ativo. A calibração usa exemplos e instruções; não altera os pesos dos modelos.",
+            "Cada IA selecionada treina pelo tempo configurado (mínimo de 10 minutos; Ultimate = 5 horas). O tempo em espera por segurança não conta. A calibração melhora instruções e referências, mas não altera os pesos do modelo.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
