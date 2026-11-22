@@ -25,7 +25,8 @@ data class AppSettings(
     val multiAgentTimeoutSec: Int = 180,
     val autoUnloadIdleModels: Boolean = true,
     val idleUnloadMinutes: Int = 5,
-    val thermalGuardEnabled: Boolean = true,
+    val thermalGuardEnabled: Boolean = false,
+    val systemRamReserveMb: Long = 200L,
     val defaultMaxTokens: Int = 1024,
     val darkThemeEnabled: Boolean = true,
     val autoStartServerOnLaunch: Boolean = false,
@@ -44,6 +45,7 @@ class SettingsRepository(private val context: Context) {
         val AUTO_UNLOAD = booleanPreferencesKey("auto_unload_idle")
         val IDLE_UNLOAD_MINUTES = intPreferencesKey("idle_unload_minutes")
         val THERMAL_GUARD_ENABLED = booleanPreferencesKey("thermal_guard_enabled")
+        val SYSTEM_RAM_RESERVE_MB = longPreferencesKey("system_ram_reserve_mb_v1")
         val DEFAULT_MAX_TOKENS = intPreferencesKey("default_max_tokens")
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val AUTO_START_SERVER = booleanPreferencesKey("auto_start_server")
@@ -60,7 +62,8 @@ class SettingsRepository(private val context: Context) {
             multiAgentTimeoutSec = prefs[Keys.MULTIAGENT_TIMEOUT_SEC] ?: 180,
             autoUnloadIdleModels = prefs[Keys.AUTO_UNLOAD] ?: true,
             idleUnloadMinutes = (prefs[Keys.IDLE_UNLOAD_MINUTES] ?: 5).coerceIn(1, 30),
-            thermalGuardEnabled = prefs[Keys.THERMAL_GUARD_ENABLED] ?: true,
+            thermalGuardEnabled = prefs[Keys.THERMAL_GUARD_ENABLED] ?: false,
+            systemRamReserveMb = (prefs[Keys.SYSTEM_RAM_RESERVE_MB] ?: 200L).coerceIn(200L, 1024L),
             defaultMaxTokens = (prefs[Keys.DEFAULT_MAX_TOKENS] ?: 1024).coerceIn(256, 4096),
             darkThemeEnabled = prefs[Keys.DARK_THEME] ?: true,
             autoStartServerOnLaunch = prefs[Keys.AUTO_START_SERVER] ?: false,
@@ -114,6 +117,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun updateThermalGuard(enabled: Boolean) {
         context.settingsDataStore.edit { it[Keys.THERMAL_GUARD_ENABLED] = enabled }
+    }
+
+    suspend fun updateSystemRamReserveMb(reserveMb: Long) {
+        context.settingsDataStore.edit { it[Keys.SYSTEM_RAM_RESERVE_MB] = reserveMb.coerceIn(200L, 1024L) }
     }
 
     suspend fun updateDefaultMaxTokens(tokens: Int) {
