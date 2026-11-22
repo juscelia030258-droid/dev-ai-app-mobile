@@ -30,6 +30,7 @@ class MemoryBudgetManager(
 ) {
     private val mutex = Mutex()
     private var ramLimitMb: Long = 4096L
+    private var systemRamReserveMb: Long = 200L
 
     private val _state = MutableStateFlow(
         MemoryStatusState(
@@ -52,6 +53,11 @@ class MemoryBudgetManager(
         refreshProfile()
     }
 
+    fun updateSystemRamReserveMb(reserveMb: Long) {
+        systemRamReserveMb = reserveMb.coerceIn(200L, 1024L)
+        refreshProfile()
+    }
+
     suspend fun checkCanFitModel(
         requestedFootprintMb: Long,
         currentlyLoadedMb: Long,
@@ -68,7 +74,7 @@ class MemoryBudgetManager(
             currentlyLoadedMb + requestedFootprintMb
         }
 
-        val systemHeadroomMb = deviceProfiler.recommendedMemoryHeadroomMb()
+        val systemHeadroomMb = deviceProfiler.recommendedMemoryHeadroomMb(systemRamReserveMb)
         when {
             projectedMb > effectiveBudget -> false to "O modelo exige ~${requestedFootprintMb} MB, acima do orçamento exclusivo do modelo (${effectiveBudget} MB)."
             deviceProfiler.isSystemLowMemory() ->
