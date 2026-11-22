@@ -494,7 +494,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 profile.availableRamMb < settings.systemRamReserveMb + 64L
             if (!severeThermal && !lowMemory) {
                 _calibrationState.value = _calibrationState.value.copy(thermalMessage = null)
-                if (thermal.contains("leve", ignoreCase = true) || thermal.contains("Moderado", ignoreCase = true)) delay(4_000L)
+                if (settings.thermalGuardEnabled && (thermal.contains("leve", ignoreCase = true) || thermal.contains("Moderado", ignoreCase = true))) delay(4_000L)
                 return
             }
             val reason = buildList {
@@ -643,7 +643,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         System.currentTimeMillis()
                     }
                     report.append("\n\n").append(role.displayName).append(" — ").append(mode.title)
-                        .append(": limite de ").append(durationMinutes).append(" min.")
+                        .append(": meta de ").append(durationMinutes).append(" min.")
                     _calibrationState.value = _calibrationState.value.copy(
                         currentRole = role, currentCase = "Preparando " + role.displayName,
                         currentElapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L),
