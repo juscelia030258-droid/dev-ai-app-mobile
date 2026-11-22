@@ -145,6 +145,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val primary = container.apiKeyManager.ensurePermanentPrimaryKey()
             _primaryKeyPlaintext.value = container.apiKeyManager.decryptKeyForDisplay(primary)
             val initialSettings = container.settingsRepository.settingsFlow.first()
+            container.memoryBudgetManager.updateUserRamLimitMb(initialSettings.ramLimitMb)
+            container.memoryBudgetManager.updateSystemRamReserveMb(initialSettings.systemRamReserveMb)
             if (initialSettings.autoStartServerOnLaunch && !serverStatus.value.isRunning) {
                 LocalApiForegroundService.startServerService(getApplication(), initialSettings.serverPort)
                 container.networkDiscovery.refreshNow()
@@ -1110,6 +1112,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateSystemRamReserveMb(reserveMb: Long) {
+        viewModelScope.launch {
+            container.settingsRepository.updateSystemRamReserveMb(reserveMb)
+            container.memoryBudgetManager.updateSystemRamReserveMb(reserveMb)
+        }
+    }
+
     fun updateLanOnlyMode(enabled: Boolean) {
         viewModelScope.launch { container.settingsRepository.updateLanOnlyMode(enabled) }
     }
@@ -1173,6 +1182,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             container.settingsRepository.resetToDefaults()
             val defaults = AppSettings()
             container.memoryBudgetManager.updateUserRamLimitMb(defaults.ramLimitMb)
+            container.memoryBudgetManager.updateSystemRamReserveMb(defaults.systemRamReserveMb)
             container.modelRepository.revalidateAllModels()
             _uiBannerMessage.value = "Configurações restauradas para o padrão de fábrica."
         }
