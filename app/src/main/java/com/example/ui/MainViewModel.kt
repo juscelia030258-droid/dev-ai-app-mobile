@@ -461,7 +461,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setCalibrationDuration(role: AgentRole, minutes: Int) {
         if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
         _calibrationDurations.value = _calibrationDurations.value.toMutableMap().apply {
-            put(role, minutes.coerceIn(1, 120))
+            put(role, minutes.coerceIn(10, 120))
         }
     }
 
@@ -484,9 +484,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val startedWaiting = System.currentTimeMillis()
         while (true) {
             val profile = container.deviceProfiler.captureProfile()
+            val settings = container.settingsRepository.settingsFlow.first()
             val thermal = profile.thermalStatusLabel
-            val severeThermal = container.deviceProfiler.isThermalSevereOrCritical()
-            val lowMemory = container.deviceProfiler.isSystemLowMemory() || profile.availableRamMb < 760L
+            // The app-level thermal guard is optional; Android firmware thermal protection remains active.
+            val severeThermal = settings.thermalGuardEnabled && container.deviceProfiler.isThermalSevereOrCritical()
+            val lowMemory = container.deviceProfiler.isSystemLowMemory() ||
+                profile.availableRamMb < settings.systemRamReserveMb + 64L
             if (!severeThermal && !lowMemory) {
                 _calibrationState.value = _calibrationState.value.copy(thermalMessage = null)
                 if (thermal.contains("leve", ignoreCase = true) || thermal.contains("Moderado", ignoreCase = true)) delay(4_000L)
@@ -494,11 +497,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             val reason = buildList {
                 if (severeThermal) add("temperatura elevada ($thermal)")
-                if (lowMemory) add("pouca RAM livre (${profile.availableRamMb} MB)")
+                if (lowMemory) add("RAM livre abaixo da reserva configurada (${settings.systemRamReserveMb} MB)")
             }.joinToString(" e ")
-            _calibrationState.value = _calibrationState.value.copy(thermalMessage = "Treinamento em espera por segurança: $reason.")
+            _calibrationState.value = _calibrationState.value.copy(thermalMessage = "Treinamento em espera: $reason.")
             if (System.currentTimeMillis() - startedWaiting >= 180_000L) {
-                throw IllegalStateException("SACE pausado automaticamente: $reason. Aguarde o aparelho esfriar/liberar memória e retome.")
+                throw IllegalStateException("SACE pausado automaticamente: $reason. Libere memória ou aguarde o aparelho estabilizar e retome.")
             }
             delay(15_000L)
         }
@@ -607,7 +610,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (role != null && mode != null) role to mode else null
             }?.toMap().orEmpty()
             val restoredDurations = savedCheckpoint?.selectedDurations?.mapNotNull { (roleId, minutes) ->
-                roles.firstOrNull { it.id == roleId }?.let { it to minutes.coerceIn(1, 120) }
+                roles.firstOrNull { it.id == roleId }?.let { it to minutes.coerceIn(10, 120) }
             }?.toMap().orEmpty()
             val selectedDurations = _calibrationDurations.value.toMutableMap().apply { putAll(restoredDurations) }
             val selectedModes = _calibrationModes.value.toMutableMap().apply { putAll(restoredModes) }
@@ -620,15 +623,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val isSurpriseSession = sessionNumber % 5 == 0
             val report = StringBuilder("SACE — sessão #$sessionNumber")
             var completed = 0
-            val hasUltimate = selectedModes.values.any { it == CalibrationMode.ULTIMATE }
-            val total = if (hasUltimate) 0 else roles.sumOf { role ->
-                val mode = selectedModes[role] ?: CalibrationMode.NORMAL
-                when (mode) {
-                    CalibrationMode.NORMAL -> 3
-                    CalibrationMode.ADVANCED -> 6
-                    CalibrationMode.ULTIMATE -> 0
-                }
-            } + if (isSurpriseSession) roles.size else 0
+            val total = 0 // Time-based calibration: exercises repeat until each selected agent reaches its target.
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
             var taskStarted = false
             try {
@@ -640,16 +635,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val mode = if (isResumingThisRole) runCatching { CalibrationMode.valueOf(savedCheckpoint!!.mode) }.getOrDefault(selectedModes[role] ?: CalibrationMode.NORMAL) else (selectedModes[role] ?: CalibrationMode.NORMAL)
                     val durationMinutes = if (mode == CalibrationMode.ULTIMATE) 300 else selectedDurations.getValue(role)
                     // Only active calibration time counts; time while the app is paused/offline is excluded.
-                    val roleStartedAt = if (isResumingThisRole) {
+                    var roleStartedAt = if (isResumingThisRole) {
                         System.currentTimeMillis() - savedCheckpoint!!.elapsedMs.coerceAtLeast(0L)
                     } else {
                         System.currentTimeMillis()
                     }
-                    val roleDeadline = roleStartedAt + durationMinutes * 60_000L
                     report.append("\n\n").append(role.displayName).append(" — ").append(mode.title)
                         .append(": limite de ").append(durationMinutes).append(" min.")
                     _calibrationState.value = _calibrationState.value.copy(
-                        currentRole = role, currentCase = "Preparando " + role.displayName
+                        currentRole = role, currentCase = "Preparando " + role.displayName,
+                        currentElapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L),
+                        targetDurationMs = durationMinutes * 60_000L
                     )
                     val roleNotes = StringBuilder()
                     val pool = cases.getValue(role)
@@ -661,8 +657,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val initialOffset = sacePrefs.getInt("next_${role.id}", 0).coerceAtLeast(0)
                     var attempt = if (isResumingThisRole) savedCheckpoint!!.nextAttempt else 0
                     val exerciseBaseOffset = if (isResumingThisRole) initialOffset - attempt else initialOffset
-                    while (mode == CalibrationMode.ULTIMATE || attempt < selectedPool.size) {
-                        if (System.currentTimeMillis() >= roleDeadline) break
+                    var consecutiveFailures = 0
+                    while (System.currentTimeMillis() - roleStartedAt < durationMinutes * 60_000L) {
                         val cycle = attempt / selectedPool.size
                         val exerciseIndex = saceProgressStore.chooseExerciseIndex(
                             role.id, selectedPool.size, exerciseBaseOffset + attempt
@@ -720,7 +716,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             selectedDurations = selectedDurations.mapKeys { it.key.id },
                             elapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L)
                         )
+                        val safeWaitStartedAt = System.currentTimeMillis()
                         awaitSafeSaceConditions()
+                        // Safety waits do not count toward the requested training duration.
+                        roleStartedAt += System.currentTimeMillis() - safeWaitStartedAt
+                        if (System.currentTimeMillis() - roleStartedAt >= durationMinutes * 60_000L) break
                         if (pauseRequested) throw kotlinx.coroutines.CancellationException("Pausa solicitada pelo usuário")
                         val calibrationImagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
                         val turns = listOf(ChatTurn(
@@ -776,9 +776,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             elapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L)
                         )
                         if (failure != null || output.isBlank()) {
-                            report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
-                            if (mode != CalibrationMode.ULTIMATE) break
+                            report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure ?: "resposta vazia")
+                            consecutiveFailures++
+                            if (consecutiveFailures >= 3) {
+                                throw IllegalStateException("A calibração de ${role.displayName} falhou três vezes seguidas. Confira se há um modelo compatível associado e tente novamente.")
+                            }
+                            delay(1_500L)
                         } else {
+                            consecutiveFailures = 0
                             report.append("\n• ").append(role.displayName).append(" — exercício ")
                                 .append(attempt + 1).append(": inferência concluída")
                             if (evaluation != null) {
@@ -798,7 +803,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (attemptSucceeded) completed++
                         attempt++
                         sacePrefs.edit().putInt("next_${role.id}", (exerciseBaseOffset + attempt) % selectedPool.size).apply()
-                        _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
+                        _calibrationState.value = _calibrationState.value.copy(
+                            completedCases = completed,
+                            currentElapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L),
+                            targetDurationMs = durationMinutes * 60_000L
+                        )
                         if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
                     }
                     report.append("\n• ").append(role.displayName).append(": ")
