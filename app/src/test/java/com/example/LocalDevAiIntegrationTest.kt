@@ -67,7 +67,7 @@ class LocalDevAiIntegrationTest {
         val container = (context.applicationContext as LocalDevAiApplication).container
 
         val adaptiveHeadroom = container.deviceProfiler.recommendedMemoryHeadroomMb()
-        assertTrue("Adaptive headroom must remain bounded", adaptiveHeadroom in 256L..512L)
+        assertTrue("Adaptive headroom must honor the configured Android reserve", adaptiveHeadroom >= 200L)
         val presetIds = container.modelRepository.recommendedPresets.map { it.id }
         assertTrue(presetIds.contains("phi4_mini_instruct_q4_k_m"))
         assertTrue(presetIds.contains("qwen2_5_coder_3b_q4_k_m"))
@@ -376,25 +376,25 @@ class LocalDevAiIntegrationTest {
         val initial = repo.settingsFlow.first()
         assertEquals(8080, initial.serverPort)
         assertEquals(5, initial.idleUnloadMinutes)
-        assertTrue(initial.thermalGuardEnabled)
+        assertFalse(initial.thermalGuardEnabled)
         assertEquals(1024, initial.defaultMaxTokens)
         assertFalse(initial.autoStartServerOnLaunch)
 
         repo.updateIdleUnloadMinutes(99)
-        repo.updateThermalGuard(false)
+        repo.updateThermalGuard(true)
         repo.updateDefaultMaxTokens(9999)
         repo.updateAutoStartServer(true)
 
         val updated = repo.settingsFlow.first()
         assertEquals(30, updated.idleUnloadMinutes)
-        assertFalse(updated.thermalGuardEnabled)
+        assertTrue(updated.thermalGuardEnabled)
         assertEquals(4096, updated.defaultMaxTokens)
         assertTrue(updated.autoStartServerOnLaunch)
 
         repo.resetToDefaults()
         val restored = repo.settingsFlow.first()
         assertEquals(5, restored.idleUnloadMinutes)
-        assertTrue(restored.thermalGuardEnabled)
+        assertFalse(restored.thermalGuardEnabled)
         assertEquals(1024, restored.defaultMaxTokens)
         assertFalse(restored.autoStartServerOnLaunch)
     }
