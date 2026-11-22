@@ -23,5 +23,7 @@ data class CalibrationUiState(
     val isBenchmarkRunning: Boolean = false,
     val benchmarkProgress: Int = 0,
     val benchmarkReport: String = "",
-    val benchmarkError: String? = null
+    val benchmarkError: String? = null,
+    val currentElapsedMs: Long = 0L,
+    val targetDurationMs: Long = 0L
 )
