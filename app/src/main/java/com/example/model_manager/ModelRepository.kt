@@ -69,6 +69,54 @@ class ModelRepository(
             notes = "Modelo especializado em programação; contexto adaptativo e execução sequencial recomendados em celulares."
         ),
         RecommendedModelPreset(
+            id = "qwen2_5_coder_1_5b_q4_k_m",
+            name = "Qwen2.5-Coder 1.5B Instruct (Q4_K_M)",
+            recommendedRole = AgentRole.CODING,
+            format = ModelFormat.GGUF,
+            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+            estimatedSizeMb = 1120L,
+            estimatedRamMb = 1800L,
+            supportsVision = false,
+            quantization = "Q4_K_M",
+            notes = "Versão menor da família Qwen2.5-Coder; opção mais leve para programação em celular."
+        ),
+        RecommendedModelPreset(
+            id = "qwen2_5_1_5b_instruct_q4_k_m",
+            name = "Qwen2.5 1.5B Instruct (Q4_K_M)",
+            recommendedRole = AgentRole.REASONING,
+            format = ModelFormat.GGUF,
+            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+            estimatedSizeMb = 1120L,
+            estimatedRamMb = 1800L,
+            supportsVision = false,
+            quantization = "Q4_K_M",
+            notes = "Modelo geral compacto para explicações, raciocínio e tarefas tecnológicas."
+        ),
+        RecommendedModelPreset(
+            id = "qwen2_5_3b_instruct_q4_k_m",
+            name = "Qwen2.5 3B Instruct (Q4_K_M)",
+            recommendedRole = AgentRole.REASONING,
+            format = ModelFormat.GGUF,
+            downloadUrl = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+            estimatedSizeMb = 2100L,
+            estimatedRamMb = 2900L,
+            supportsVision = false,
+            quantization = "Q4_K_M",
+            notes = "Modelo geral maior; exige mais RAM e contexto moderado em celulares."
+        ),
+        RecommendedModelPreset(
+            id = "deepseek_coder_1_3b_q4_k_m",
+            name = "DeepSeek-Coder 1.3B Instruct (Q4_K_M)",
+            recommendedRole = AgentRole.CODING,
+            format = ModelFormat.GGUF,
+            downloadUrl = "https://huggingface.co/tensorblock/deepseek-coder-1.3b-instruct-GGUF/resolve/main/deepseek-coder-1.3b-instruct-Q4_K_M.gguf",
+            estimatedSizeMb = 813L,
+            estimatedRamMb = 1500L,
+            supportsVision = false,
+            quantization = "Q4_K_M",
+            notes = "Modelo compacto voltado a código; quantização GGUF de terceiros compatível com llama.cpp."
+        ),
+        RecommendedModelPreset(
             id = "smolvlm_500m_vision",
             name = "SmolVLM 500M Instruct (GGUF + mmproj)",
             recommendedRole = AgentRole.VISION,
