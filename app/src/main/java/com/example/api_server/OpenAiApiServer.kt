@@ -37,6 +37,7 @@ import io.ktor.server.routing.options
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.serialization.encodeToString
@@ -87,6 +89,7 @@ class OpenAiApiServer(
     private val settingsRepository: SettingsRepository
 ) {
     private val maxRequestBodyBytes = 15_000_000
+    private val requestBodyReadTimeoutMs = 60_000L
     private val streamEventBufferCapacity = 64
 
     private val json = Json {
@@ -381,7 +384,29 @@ class OpenAiApiServer(
 
         // Enforce the cap while streaming, including chunked requests without Content-Length.
         val bodyBytes = try {
-            readBodyAtMost(call, maxRequestBodyBytes)
+            withTimeout(requestBodyReadTimeoutMs) {
+                readBodyAtMost(call, maxRequestBodyBytes)
+            }
+        } catch (_: TimeoutCancellationException) {
+            respondOpenAiError(
+                call,
+                HttpStatusCode(408, "Request Timeout"),
+                "Tempo limite de 60 segundos excedido ao receber o corpo da requisição.",
+                "invalid_request_error",
+                "request_body_timeout"
+            )
+            logRequest(
+                "POST",
+                "/v1/chat/completions",
+                null,
+                remoteIp,
+                auth.keyEntity.name,
+                408,
+                System.currentTimeMillis() - startMs,
+                false,
+                "Timeout ao receber corpo da requisição"
+            )
+            return
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
