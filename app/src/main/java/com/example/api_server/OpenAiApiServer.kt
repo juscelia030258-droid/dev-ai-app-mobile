@@ -409,8 +409,27 @@ class OpenAiApiServer(
             return
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
-            null
+        } catch (err: Exception) {
+            // A transport/read failure is not evidence that the body exceeded the size limit.
+            respondOpenAiError(
+                call,
+                HttpStatusCode.BadRequest,
+                "Falha ao receber o corpo da requisição: ${err.message ?: "erro de leitura"}",
+                "invalid_request_error",
+                "body_read_failed"
+            )
+            logRequest(
+                "POST",
+                "/v1/chat/completions",
+                null,
+                remoteIp,
+                auth.keyEntity.name,
+                400,
+                System.currentTimeMillis() - startMs,
+                false,
+                "Falha ao ler corpo da requisição"
+            )
+            return
         }
         if (bodyBytes == null) {
             respondOpenAiError(
