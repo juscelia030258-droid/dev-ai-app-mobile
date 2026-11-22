@@ -99,12 +99,13 @@ class DeviceProfiler(private val context: Context) {
      * Keeps a device-aware reserve instead of requiring a fixed 768 MB on every phone.
      * Android's own low-memory threshold is used as the baseline.
      */
-    fun recommendedMemoryHeadroomMb(): Long {
+    fun recommendedMemoryHeadroomMb(configuredReserveMb: Long = 200L): Long {
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         val memInfo = ActivityManager.MemoryInfo()
         activityManager?.getMemoryInfo(memInfo)
         val androidThresholdMb = (memInfo.threshold / (1024L * 1024L)).coerceAtLeast(0L)
-        return (androidThresholdMb + 128L).coerceIn(256L, 512L)
+        // Respect the user's reserve while never going below Android's own low-memory threshold.
+        return max(androidThresholdMb, configuredReserveMb.coerceIn(200L, 1024L))
     }
 
     fun isSystemLowMemory(): Boolean {
