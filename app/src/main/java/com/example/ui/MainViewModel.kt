@@ -546,17 +546,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         mapOf(AgentRole.CODING to 60, AgentRole.REASONING to 45, AgentRole.VISION to 20)
     )
     private val _calibrationModes = MutableStateFlow(
-        mapOf(
-            AgentRole.CODING to CalibrationMode.NORMAL,
-            AgentRole.REASONING to CalibrationMode.NORMAL,
-            AgentRole.VISION to CalibrationMode.NORMAL
-        )
+        AgentRole.entries.associateWith { role ->
+            val savedMode = calibrationPreferences.getString("calibration_mode_${role.id}", null)
+            runCatching { CalibrationMode.valueOf(savedMode ?: CalibrationMode.NORMAL.name) }
+                .getOrDefault(CalibrationMode.NORMAL)
+        }
     )
     val calibrationModes: StateFlow<Map<AgentRole, CalibrationMode>> = _calibrationModes.asStateFlow()
 
     fun setCalibrationMode(role: AgentRole, mode: CalibrationMode) {
         if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
         _calibrationModes.value = _calibrationModes.value.toMutableMap().apply { put(role, mode) }
+        calibrationPreferences.edit().putString("calibration_mode_${role.id}", mode.name).apply()
     }
     val calibrationDurations: StateFlow<Map<AgentRole, Int>> = _calibrationDurations.asStateFlow()
 
