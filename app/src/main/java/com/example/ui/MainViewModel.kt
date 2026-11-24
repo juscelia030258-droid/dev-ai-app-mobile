@@ -35,9 +35,12 @@ import com.example.monitoring.data.LocalModelEntity
 import com.example.monitoring.data.MultiAgentRunEntity
 import com.example.security.KeyPermission
 import com.example.settings.AppSettings
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -55,6 +58,8 @@ data class AgentConsoleState(
     val isGenerating: Boolean = false,
     val output: String = "",
     val error: String? = null,
+    val status: String? = null,
+    val lastPrompt: String = "",
     val selectedImageUri: Uri? = null,
     val selectedImageTempPath: String? = null
 )
@@ -391,18 +396,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun runAgentConsolePrompt(role: AgentRole, prompt: String) {
-        if (prompt.isBlank()) return
+        val normalizedPrompt = prompt.trim()
+        if (normalizedPrompt.isBlank()) {
+            updateConsole(role) { it.copy(error = "Digite uma mensagem antes de executar.", status = null) }
+            return
+        }
+
         consoleJobs.remove(role)?.cancel()
-        val job = viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val thisJob = currentCoroutineContext()[Job]
             val currentConsole = _agentConsoles.value[role] ?: AgentConsoleState()
-            updateConsole(role) { it.copy(isGenerating = true, output = "", error = null) }
-            InferenceTaskForegroundService.startTask(getApplication())
+            val streamedOutput = StringBuilder()
+            var receivedCompletion = false
+            var failureMessage: String? = null
+            var taskStarted = false
+
+            updateConsole(role) {
+                it.copy(
+                    isGenerating = true,
+                    output = "",
+                    error = null,
+                    status = "Mensagem preparada. Iniciando inferência local...",
+                    lastPrompt = normalizedPrompt
+                )
+            }
 
             try {
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
                 val turns = listOf(
                     ChatTurn(
                         role = "user",
-                        text = prompt.trim(),
+                        text = normalizedPrompt,
                         imagePath = if (role == AgentRole.VISION) currentConsole.selectedImageTempPath else null
                     )
                 )
@@ -411,33 +436,86 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     AgentRole.VISION -> container.visionAgent.streamExecute(turns, "UI")
                     AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "UI")
                 }
-                stream.collect { ev ->
-                    when (ev) {
+
+                stream.collect { event ->
+                    when (event) {
+                        is InferenceStreamEvent.Status -> {
+                            updateConsole(role) { it.copy(status = event.message) }
+                        }
                         is InferenceStreamEvent.Token -> {
-                            updateConsole(role) { it.copy(output = it.output + ev.text) }
+                            if (event.text.isNotEmpty()) {
+                                streamedOutput.append(event.text)
+                                updateConsole(role) {
+                                    it.copy(output = streamedOutput.toString(), error = null)
+                                }
+                            }
                         }
                         is InferenceStreamEvent.Completed -> {
-                            updateConsole(role) {
-                                it.copy(isGenerating = false, output = ev.fullText.ifBlank { it.output })
+                            receivedCompletion = true
+                            val finalText = event.fullText.takeIf { it.isNotBlank() }
+                                ?: streamedOutput.toString()
+                            if (finalText.isBlank()) {
+                                failureMessage = "A inferência terminou, mas o modelo não gerou texto. Verifique o modelo associado, o backend e os parâmetros de saída."
+                            } else {
+                                streamedOutput.clear()
+                                streamedOutput.append(finalText)
+                                updateConsole(role) {
+                                    it.copy(output = finalText, error = null, status = "Resposta recebida do modelo local.")
+                                }
                             }
                         }
                         is InferenceStreamEvent.Failed -> {
-                            updateConsole(role) { it.copy(isGenerating = false, error = ev.errorMessage) }
+                            failureMessage = event.errorMessage
+                            updateConsole(role) {
+                                it.copy(error = event.errorMessage, status = "A inferência foi encerrada com erro.")
+                            }
                         }
                         else -> Unit
                     }
                 }
+
+                when {
+                    failureMessage != null -> updateConsole(role) {
+                        it.copy(error = failureMessage, status = "Não foi possível concluir a resposta.")
+                    }
+                    !receivedCompletion -> updateConsole(role) {
+                        it.copy(
+                            error = "O fluxo de inferência foi encerrado sem evento de conclusão. A mensagem foi enviada pelo console, mas não houve confirmação de resposta do runtime.",
+                            status = "Resposta não confirmada."
+                        )
+                    }
+                    streamedOutput.isBlank() -> updateConsole(role) {
+                        it.copy(
+                            error = "O modelo concluiu sem conteúdo. Isso não será tratado como uma resposta válida.",
+                            status = "Resposta vazia detectada."
+                        )
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.java.simpleName
+                updateConsole(role) {
+                    it.copy(error = "Falha no Console Direto: $detail", status = "Erro durante a inferência.")
+                }
             } finally {
-                updateConsole(role) { it.copy(isGenerating = false) }
-                InferenceTaskForegroundService.finishTask(getApplication())
+                if (consoleJobs[role] === thisJob) {
+                    updateConsole(role) { it.copy(isGenerating = false) }
+                }
+                if (taskStarted) {
+                    InferenceTaskForegroundService.finishTask(getApplication())
+                }
             }
         }
         consoleJobs[role] = job
+        job.start()
     }
 
     fun stopAgentConsole(role: AgentRole) {
         consoleJobs.remove(role)?.cancel()
-        updateConsole(role) { it.copy(isGenerating = false) }
+        updateConsole(role) {
+            it.copy(isGenerating = false, status = "Execução interrompida pelo usuário.")
+        }
     }
 
 
