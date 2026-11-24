@@ -157,6 +157,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
     val calibrationState by viewModel.calibrationState.collectAsStateWithLifecycle()
     val calibrationDurations by viewModel.calibrationDurations.collectAsStateWithLifecycle()
     val calibrationModes by viewModel.calibrationModes.collectAsStateWithLifecycle()
+    val selectedCalibrationRoles by viewModel.selectedCalibrationRoles.collectAsStateWithLifecycle()
 
     LaunchedEffect(bannerMessage) {
         val msg = bannerMessage
@@ -393,6 +394,8 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             state = calibrationState,
                             durations = calibrationDurations,
                             modes = calibrationModes,
+                            selectedAgents = selectedCalibrationRoles,
+                            onAgentSelectionChange = viewModel::setCalibrationAgentSelected,
                             onModeChange = viewModel::setCalibrationMode,
                             onDurationChange = viewModel::setCalibrationDuration,
                             onStart = { viewModel.startCalibration() },
