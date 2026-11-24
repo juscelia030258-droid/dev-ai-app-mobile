@@ -585,6 +585,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "NEBULA OS — Desempenho: analise uma GUI lenta em hardware limitado. Separe custo de renderização, I/O, processos em segundo plano e consumo de RAM.",
                     "NEBULA OS — Testes: escreva testes unitários para um módulo de configurações e testes de integração para GUI ↔ serviço, incluindo falhas e timeout.",
                     "NEBULA OS — Integração realista: receba requisitos para uma central de comando e entregue árvore de arquivos, interfaces Kotlin, serviço C e critérios de aceitação."
+                    "GITHUB — Identifique se uma URL pertence realmente a github.com ou é um domínio parecido. Explique por que domínio reconhecido não garante que o arquivo ou repositório seja seguro.",
+                    "GITHUB — Prepare um git clone de um repositório público oficial para uma pasta nova no macOS, sem executar scripts nem sobrescrever arquivos existentes. Informe diretório, comando e resultado esperado.",
+                    "GITHUB — Prepare o download de um asset de release usando GitHub CLI, indicando owner/repo, tag, nome do arquivo e pasta de destino. Não use download seguido de execução.",
+                    "GITHUB — Após baixar um arquivo, proponha verificação SHA-256 e, quando disponível, verificação de release, asset ou atestação. Explique o que cada verificação comprova e o que não comprova.",
+                    "GITHUB — Analise um projeto com README, scripts de instalação e dependências. Liste o que precisa ser inspecionado antes de executar qualquer arquivo baixado.",
+                    "TERMINAL — Diferencie comando sugerido, comando realmente executado e resultado confirmado. Se não houver retorno do terminal do computador, não declare o download concluído."
                 ),
                 AgentRole.VISION to listOf(
                     "NEBULA OS — Reconhecimento de desktop: analise a captura e identifique barra superior, dock, menu de aplicativos, janelas, painel e área de trabalho. Separe observação de hipótese.",
@@ -621,6 +627,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "NEBULA OS — Integração: Coding AI propõe uma API e Vision AI identifica um componente visual incompatível. Compare contratos e determine o que precisa ser ajustado.",
                     "NEBULA OS — Pensamento crítico: uma tela parece indicar que o serviço iniciou, mas não há log. Explique por que aparência não comprova funcionamento e como verificar.",
                     "NEBULA OS — Revisão de projeto: avalie uma proposta de OS com kernel Linux, serviços em C e GUI Kotlin. Identifique riscos, dependências, etapas e critérios de conclusão."
+                    "SEGURANÇA DE LINKS — Compare github.com, github.com.exemplo.net e um link encurtado. Identifique o hostname real e classifique o nível de confiança sem declarar o conteúdo seguro.",
+                    "GITHUB — Avalie se um repositório público é uma fonte adequada para uma dependência. Considere proprietário, documentação, histórico, releases, tags e sinais de manutenção.",
+                    "GITHUB — Diferencie checksum SHA-256, assinatura digital e atestação de proveniência. Explique por que um hash publicado no mesmo local do arquivo não prova sozinho a identidade do autor.",
+                    "DOWNLOAD — Planeje um fluxo seguro para obter um asset de release: validar URL, confirmar projeto e versão, baixar sem executar, verificar integridade/proveniência e inspecionar o conteúdo.",
+                    "WIKIPÉDIA — Use a Wikipédia como ponto de partida para conhecimento geral, mas procure referências primárias para decisões técnicas, segurança, compatibilidade e versões.",
+                    "TERMINAL REMOTO — Determine se existe uma ferramenta real conectada ao computador. Se não existir, diferencie instruções de terminal de execução comprovada e não invente caminho, hash ou saída."
                 )
             )
             val restoredModes = savedCheckpoint?.selectedModes?.mapNotNull { (roleId, modeName) ->
