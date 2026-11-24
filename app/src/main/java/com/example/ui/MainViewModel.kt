@@ -61,7 +61,8 @@ data class AgentConsoleState(
     val status: String? = null,
     val lastPrompt: String = "",
     val selectedImageUri: Uri? = null,
-    val selectedImageTempPath: String? = null
+    val selectedImageTempPath: String? = null,
+    val conversation: List<ChatTurn> = emptyList()
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -424,13 +425,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 InferenceTaskForegroundService.startTask(getApplication())
                 taskStarted = true
-                val turns = listOf(
-                    ChatTurn(
-                        role = "user",
-                        text = normalizedPrompt,
-                        imagePath = if (role == AgentRole.VISION) currentConsole.selectedImageTempPath else null
-                    )
+                val userTurn = ChatTurn(
+                    role = "user",
+                    text = normalizedPrompt,
+                    imagePath = if (role == AgentRole.VISION) currentConsole.selectedImageTempPath else null
                 )
+                // Retain at most 10 exchanges (20 turns) to avoid unbounded memory growth.
+                val turns = currentConsole.conversation.takeLast(20) + userTurn
                 val stream = when (role) {
                     AgentRole.CODING -> container.codingAgent.streamExecute(turns, "UI")
                     AgentRole.VISION -> container.visionAgent.streamExecute(turns, "UI")
@@ -460,7 +461,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 streamedOutput.clear()
                                 streamedOutput.append(finalText)
                                 updateConsole(role) {
-                                    it.copy(output = finalText, error = null, status = "Resposta recebida do modelo local.")
+                                    it.copy(
+                                        output = finalText,
+                                        error = null,
+                                        status = "Resposta recebida do modelo local.",
+                                        conversation = (currentConsole.conversation + userTurn + ChatTurn(role = "assistant", text = finalText)).takeLast(20)
+                                    )
                                 }
                             }
                         }
@@ -515,6 +521,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         consoleJobs.remove(role)?.cancel()
         updateConsole(role) {
             it.copy(isGenerating = false, status = "Execução interrompida pelo usuário.")
+        }
+    }
+
+    fun clearAgentConsole(role: AgentRole) {
+        consoleJobs.remove(role)?.cancel()
+        updateConsole(role) {
+            it.copy(
+                isGenerating = false,
+                output = "",
+                error = null,
+                status = "Conversa limpa.",
+                lastPrompt = "",
+                conversation = emptyList(),
+                selectedImageUri = null,
+                selectedImageTempPath = null
+            )
         }
     }
 
