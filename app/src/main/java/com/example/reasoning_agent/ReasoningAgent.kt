@@ -160,7 +160,10 @@ class ReasoningAgent(
             params = params
         ).collect { ev ->
             when (ev) {
-                is InferenceStreamEvent.Completed -> fullOutput = ev.fullText
+                is InferenceStreamEvent.Completed -> {
+                    fullOutput = ev.fullText
+                    if (fullOutput.isBlank()) lastError = "Reasoning AI concluiu sem produzir texto."
+                }
                 is InferenceStreamEvent.Failed -> lastError = ev.errorMessage
                 else -> Unit
             }
