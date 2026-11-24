@@ -656,11 +656,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     val roleNotes = StringBuilder()
                     val pool = cases.getValue(role)
-                    val selectedPool = when (mode) {
-                        CalibrationMode.NORMAL -> pool.take(3)
-                        CalibrationMode.ADVANCED -> pool.take(6)
-                        CalibrationMode.ULTIMATE -> pool
-                    }
+                    // Every mode rotates through the complete role-specific curriculum.
+                    // Difficulty is expressed in the task prompt, not by silently dropping most topics.
+                    val selectedPool = pool
                     val initialOffset = sacePrefs.getInt("next_${role.id}", 0).coerceAtLeast(0)
                     var attempt = if (isResumingThisRole) savedCheckpoint!!.nextAttempt else 0
                     val exerciseBaseOffset = if (isResumingThisRole) initialOffset - attempt else initialOffset
