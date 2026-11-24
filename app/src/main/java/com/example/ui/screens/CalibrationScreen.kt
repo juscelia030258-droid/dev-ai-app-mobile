@@ -87,17 +87,28 @@ fun CalibrationScreen(
                         )
                     }
                     Text(detail, style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CalibrationMode.entries.forEach { option ->
-                            if (mode == option) {
-                                Button(onClick = { onModeChange(role, option) }, enabled = !state.isRunning && !state.isBenchmarkRunning) {
-                                    Text(option.title)
-                                }
-                            } else {
-                                OutlinedButton(onClick = { onModeChange(role, option) }, enabled = !state.isRunning && !state.isBenchmarkRunning) {
-                                    Text(option.title)
+                    CalibrationMode.entries.chunked(3).forEach { modeRow ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            modeRow.forEach { option ->
+                                if (mode == option) {
+                                    Button(
+                                        onClick = { onModeChange(role, option) },
+                                        enabled = !state.isRunning && !state.isBenchmarkRunning,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(option.title, maxLines = 1)
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = { onModeChange(role, option) },
+                                        enabled = !state.isRunning && !state.isBenchmarkRunning,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(option.title, maxLines = 1)
+                                    }
                                 }
                             }
+                            repeat(3 - modeRow.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                     Text(mode.description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
