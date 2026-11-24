@@ -68,7 +68,7 @@ fun CalibrationScreen(
                 Checkbox(
                     checked = role in selectedAgents,
                     onCheckedChange = { onAgentSelectionChange(role, it) },
-                    enabled = !state.isRunning && !state.isBenchmarkRunning
+                    enabled = !state.isRunning && !state.isBenchmarkRunning && !state.canResume
                 )
             }
         }
