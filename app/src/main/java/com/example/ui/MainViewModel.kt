@@ -584,7 +584,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "NEBULA OS — Segurança: revise permissões de serviços, separação de privilégios e validação de entradas. Proponha testes sem executar ações destrutivas.",
                     "NEBULA OS — Desempenho: analise uma GUI lenta em hardware limitado. Separe custo de renderização, I/O, processos em segundo plano e consumo de RAM.",
                     "NEBULA OS — Testes: escreva testes unitários para um módulo de configurações e testes de integração para GUI ↔ serviço, incluindo falhas e timeout.",
-                    "NEBULA OS — Integração realista: receba requisitos para uma central de comando e entregue árvore de arquivos, interfaces Kotlin, serviço C e critérios de aceitação."
+                    "NEBULA OS — Integração realista: receba requisitos para uma central de comando e entregue árvore de arquivos, interfaces Kotlin, serviço C e critérios de aceitação.",
                     "GITHUB — Identifique se uma URL pertence realmente a github.com ou é um domínio parecido. Explique por que domínio reconhecido não garante que o arquivo ou repositório seja seguro.",
                     "GITHUB — Prepare um git clone de um repositório público oficial para uma pasta nova no macOS, sem executar scripts nem sobrescrever arquivos existentes. Informe diretório, comando e resultado esperado.",
                     "GITHUB — Prepare o download de um asset de release usando GitHub CLI, indicando owner/repo, tag, nome do arquivo e pasta de destino. Não use download seguido de execução.",
@@ -626,7 +626,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     "NEBULA OS — Planejamento técnico: transforme uma ideia de dock, menu e central de comando em tarefas pequenas, ordenadas e verificáveis.",
                     "NEBULA OS — Integração: Coding AI propõe uma API e Vision AI identifica um componente visual incompatível. Compare contratos e determine o que precisa ser ajustado.",
                     "NEBULA OS — Pensamento crítico: uma tela parece indicar que o serviço iniciou, mas não há log. Explique por que aparência não comprova funcionamento e como verificar.",
-                    "NEBULA OS — Revisão de projeto: avalie uma proposta de OS com kernel Linux, serviços em C e GUI Kotlin. Identifique riscos, dependências, etapas e critérios de conclusão."
+                    "NEBULA OS — Revisão de projeto: avalie uma proposta de OS com kernel Linux, serviços em C e GUI Kotlin. Identifique riscos, dependências, etapas e critérios de conclusão.",
                     "SEGURANÇA DE LINKS — Compare github.com, github.com.exemplo.net e um link encurtado. Identifique o hostname real e classifique o nível de confiança sem declarar o conteúdo seguro.",
                     "GITHUB — Avalie se um repositório público é uma fonte adequada para uma dependência. Considere proprietário, documentação, histórico, releases, tags e sinais de manutenção.",
                     "GITHUB — Diferencie checksum SHA-256, assinatura digital e atestação de proveniência. Explique por que um hash publicado no mesmo local do arquivo não prova sozinho a identidade do autor.",
