@@ -553,6 +553,24 @@ fun AgentsScreen(
                         }
                     }
 
+                    if (consoleState.lastPrompt.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Mensagem enviada: " + consoleState.lastPrompt,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (!consoleState.status.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = consoleState.status,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (consoleState.isGenerating) accent else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     if (!consoleState.error.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
