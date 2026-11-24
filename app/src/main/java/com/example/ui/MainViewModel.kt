@@ -442,6 +442,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 
     // --- AI Calibration Lab ---
+    private val _selectedCalibrationRoles = MutableStateFlow(AgentRole.entries.toSet())
+    val selectedCalibrationRoles: StateFlow<Set<AgentRole>> = _selectedCalibrationRoles.asStateFlow()
+
+    fun setCalibrationAgentSelected(role: AgentRole, selected: Boolean) {
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
+        _selectedCalibrationRoles.value = _selectedCalibrationRoles.value.toMutableSet().apply {
+            if (selected) add(role) else remove(role)
+        }
+    }
+
     private val _calibrationDurations = MutableStateFlow(
         mapOf(AgentRole.CODING to 60, AgentRole.REASONING to 45, AgentRole.VISION to 20)
     )
@@ -537,73 +547,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pauseRequested = false
         calibrationJob = viewModelScope.launch {
             val savedCheckpoint = if (resume) saceProgressStore.readCheckpoint() else null
-            val roles = listOf(AgentRole.CODING, AgentRole.REASONING, AgentRole.VISION)
+            val roles = _selectedCalibrationRoles.value.sortedBy { it.ordinal }
+            if (roles.isEmpty()) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false,
+                    error = "Selecione pelo menos uma IA para iniciar a calibração."
+                )
+                return@launch
+            }
             val cases = mapOf(
                 AgentRole.CODING to listOf(
-                    "Firmware ESP32: planeje um firmware C++ para ler um sensor, controlar uma saída e tratar falha de leitura. Inclua estados e critérios de teste.",
-                    "Menu funcional: crie a estrutura de um menu para OLED com opções, navegação por encoder e retorno. Explique como evitar bloqueios no loop principal.",
-                    "Configurações persistentes: implemente em Kotlin uma tela de opções que salva preferências, valida valores e restaura padrões.",
-                    "Depuração Kotlin: fun dividir(a: Int, b: Int): Int { return a / b }; println(dividir(10, 0)). Identifique e corrija a falha.",
-                    "Depuração Python: items = [1, 2, 3]; for i in range(len(items) + 1): print(items[i]). Corrija o limite e proponha um teste.",
-                    "API: projete uma rota HTTP que recebe configuração, valida os campos, responde com erros claros e não salva dados inválidos.",
-                    "Projeto modular: separe um aplicativo em interface, regras de negócio, armazenamento e acesso à rede. Mostre arquivos e responsabilidades.",
-                    "Linux: analise um serviço que falha ao iniciar. Liste comandos de leitura seguros para conferir status, logs, permissões e dependências; não alegue execução.",
-                    "Linux: receba um projeto de laboratório com scripts, unidades systemd e arquivos de configuração. Aponte falhas, proponha melhorias e escreva testes sem alterar o sistema real.",
-                    "ESP32 e sensores: crie um firmware C++ com leitura periódica, filtro simples, timeout de sensor e estado seguro quando a leitura falhar. Inclua testes.",
-                    "ESP32 e comunicação: projete uma troca de mensagens entre dois dispositivos usando um protocolo definido. Trate perda, repetição e dados inválidos.",
-                    "OLED e encoder: implemente a lógica de um menu com páginas, seleção, retorno, edição de valores e atualização sem bloquear o loop.",
-                    "Persistência: crie uma camada para salvar configurações com versão, valores padrão e recuperação quando os dados salvos estiverem inválidos.",
-                    "Kotlin Android: implemente uma tela de configurações com estado observável, validação, salvamento assíncrono e tratamento de erro.",
-                    "Java: analise uma classe com responsabilidades misturadas e proponha uma divisão em módulos sem alterar o comportamento público.",
-                    "Python: crie uma ferramenta de linha de comando que leia um arquivo, valide os dados e gere um relatório; trate arquivo ausente e conteúdo malformado.",
-                    "Build: analise um erro Gradle com dependências incompatíveis. Liste os arquivos e versões que precisa conferir antes de sugerir uma correção.",
-                    "Concorrência: revise um código que compartilha estado entre tarefas. Identifique condições de corrida e proponha sincronização adequada.",
-                    "Testes: transforme requisitos de um menu de firmware em casos de teste, incluindo limites, entradas inválidas e recuperação após reinicialização.",
-                    "Refatoração: receba um módulo grande e proponha uma divisão em arquivos, interfaces e responsabilidades, mantendo a compatibilidade.",
-                    "Revisão de segurança: analise uma API que recebe configurações e identifique validação ausente, exposição de segredos e operações perigosas."
-                ),
-                AgentRole.REASONING to listOf(
-                    "Lógica: Ana é mais velha que Bia. Bia é mais velha que Caio. Diego é mais novo que Caio. Ordene as quatro pessoas e explique a dedução.",
-                    "Diagnóstico tecnológico: um celular fecha um modelo local ao abrir outro aplicativo. Analise RAM, memória livre, contexto do modelo e descarregamento; separe fatos de hipóteses.",
-                    "Hardware: explique como CPU, RAM, armazenamento e sistema operacional trabalham juntos ao abrir um modelo local de IA.",
-                    "Redes: um computador conecta ao Wi-Fi, mas não abre sites. Compare hipóteses envolvendo IP, DNS, gateway e conexão externa.",
-                    "Sistemas: compare duas arquiteturas para um app móvel com três modelos de IA e pouca RAM. Considere execução sequencial, tempo e custo de recarga.",
-                    "Investigação: receba três relatos que se contradizem sobre uma falha. Liste o que está confirmado, o que falta medir e qual teste distingue as hipóteses.",
-                    "Planejamento: divida a criação de um firmware ESP32 com menu, configurações salvas e comunicação Wi-Fi em tarefas, dependências e critérios de aceite.",
-                    "Colaboração: revise uma resposta da Coding AI que afirma ter compilado um projeto sem mostrar logs. Identifique o que pode e o que não pode ser confirmado.",
-                    "Conhecimento tecnológico: explique a diferença entre processo, serviço, thread, memória virtual e armazenamento, usando exemplos simples.",
-                    "Análise de desempenho: um app usa muita RAM depois de alternar entre modelos. Separe possíveis causas e proponha medições que confirmem cada uma.",
-                    "Arquitetura: compare execução sequencial e paralela de três modelos em um celular com memória limitada. Explique os custos de cada opção.",
-                    "Investigação: um firmware reinicia aleatoriamente. Organize hipóteses sobre alimentação, watchdog, memória e sensores e escolha uma ordem de testes.",
-                    "Dados: analise uma tabela pequena com valores ausentes e duplicados. Explique como limpar os dados sem apagar informação válida.",
-                    "Probabilidade: estime a chance de pelo menos uma falha em várias tentativas independentes e explique as suposições usadas.",
-                    "Pensamento crítico: avalie uma afirmação técnica sem fonte. Diga quais evidências seriam suficientes para aceitá-la ou rejeitá-la.",
-                    "Planejamento: organize um projeto com prazo curto, três módulos dependentes e recursos limitados. Defina ordem, riscos e critérios de conclusão.",
-                    "Conflito entre agentes: duas IAs dão soluções incompatíveis. Compare as evidências, identifique o ponto de discordância e proponha um teste decisivo.",
-                    "Sistema operacional: explique como um processo inicia, abre arquivos, usa memória e encerra. Diferencie o que é comum e o que varia entre Android, Linux e Windows.",
-                    "Limites de conhecimento: responda a um problema técnico com dados insuficientes. Mostre o que pode concluir e faça a pergunta mínima necessária."
+                    "NEBULA OS — Arquitetura do sistema: proponha a divisão entre kernel Linux, serviços de sistema, daemon de sessão, interface gráfica e aplicativos. Defina responsabilidades e limites entre módulos.",
+                    "NEBULA OS — Central de comando: projete um painel administrativo para iniciar/parar serviços, consultar status, visualizar logs e confirmar ações críticas. Escreva a estrutura de componentes.",
+                    "NEBULA OS — GUI desktop: implemente em Kotlin/Compose uma janela com barra superior, dock, painel de configurações e navegação por teclado. Separe estado e componentes.",
+                    "NEBULA OS — Aparência: crie um sistema de temas com modo claro/escuro, transparência configurável, escala, tipografia e persistência de preferências.",
+                    "NEBULA OS — Gerenciador de arquivos: escreva em Kotlin a lógica de navegação por diretórios, seleção, operações assíncronas e tratamento de permissões/erros.",
+                    "NEBULA OS — Serviço de sistema: escreva um serviço Linux em C que leia uma configuração, valide entradas, registre eventos e encerre corretamente. Inclua tratamento de erro.",
+                    "NEBULA OS — Comunicação: crie um contrato IPC entre a GUI e um serviço de sistema. Defina mensagens, códigos de erro, timeout e validação.",
+                    "NEBULA OS — Inicialização: desenhe o fluxo de boot desde o kernel até a sessão gráfica. Implemente um verificador simples de dependências em C.",
+                    "NEBULA OS — Gerenciador de processos: implemente em C um utilitário que leia informações de processos no Linux via /proc, trate arquivos ausentes e apresente uso de recursos.",
+                    "NEBULA OS — Atualizações: projete um atualizador que verifica versão, integridade, espaço disponível e possibilidade de rollback antes de aplicar mudanças.",
+                    "NEBULA OS — Configurações: implemente armazenamento versionado de preferências, migração de configuração antiga e recuperação de valores inválidos.",
+                    "NEBULA OS — Terminal: construa a arquitetura de um terminal integrado à GUI, com execução isolada de comandos permitidos, histórico e tratamento de saída.",
+                    "NEBULA OS — Segurança: revise permissões de serviços, separação de privilégios e validação de entradas. Proponha testes sem executar ações destrutivas.",
+                    "NEBULA OS — Desempenho: analise uma GUI lenta em hardware limitado. Separe custo de renderização, I/O, processos em segundo plano e consumo de RAM.",
+                    "NEBULA OS — Testes: escreva testes unitários para um módulo de configurações e testes de integração para GUI ↔ serviço, incluindo falhas e timeout.",
+                    "NEBULA OS — Integração realista: receba requisitos para uma central de comando e entregue árvore de arquivos, interfaces Kotlin, serviço C e critérios de aceitação."
                 ),
                 AgentRole.VISION to listOf(
-                    "MAPA DE INTERFACE: identifique no máximo cinco componentes importantes, diga em que região estão e explique como se agrupam. Não descreva o fundo inteiro.",
-                    "LEITURA DE TEXTO: transcreva somente os rótulos realmente legíveis. Marque texto incerto como [ilegível]; não complete palavras por contexto.",
-                    "GEOMETRIA: compare alinhamento, largura relativa, espaçamento e posição de cartões e painéis. Use relações como maior/menor e esquerda/direita, sem inventar pixels.",
-                    "ESTADO VISUAL: localize controles selecionados, desativados, alertas e indicadores de carregamento. Para cada estado, cite a evidência visual.",
-                    "AUDITORIA DE UI: encontre até três inconsistências de cor, tipografia, borda, alinhamento ou espaçamento. Se não houver evidência, diga que não encontrou.",
-                    "ESPECIFICAÇÃO PARA CODING AI: transforme a tela em uma lista curta de componentes, posição relativa, estilo aproximado e comportamento que a imagem comprova.",
-                    "CONTAGEM E LOCALIZAÇÃO: conte apenas os cartões, botões ou painéis que conseguir distinguir. Informe quando algum elemento estiver parcialmente oculto.",
-                    "COMPARAÇÃO: compare duas áreas da imagem e indique uma semelhança e uma diferença concreta, sem repetir a descrição geral.",
-                    "DIAGNÓSTICO VISUAL: aponte o problema visual mais importante, a evidência e uma correção específica. Não suponha falhas de funcionamento.",
-                    "RESUMO COM EVIDÊNCIAS: responda à pergunta principal em até cinco tópicos; cada tópico deve conter uma observação visível, não uma suposição.",
-                    "FORMULÁRIO: identifique campos, rótulos, botões e agrupamentos. Informe a ordem de leitura e não suponha validações que não aparecem.",
-                    "TELA DE CONFIGURAÇÕES: agrupe opções por finalidade e destaque controles que parecem selecionados ou desativados.",
-                    "DASHBOARD: compare a hierarquia visual entre título, indicadores, gráficos e cartões. Cite somente elementos visíveis.",
-                    "ERRO VISUAL: procure sobreposição, corte, desalinhamento ou contraste insuficiente. Para cada achado, indique a região e a evidência.",
-                    "DIAGRAMA: identifique caixas, setas e relações visíveis. Se uma ligação estiver ambígua, marque como incerta.",
-                    "FOTO DE COMPONENTES: descreva somente componentes que conseguir distinguir e diferencie identificação provável de identificação confirmada.",
-                    "OCR: leia os textos mais importantes da imagem e preserve a escrita original. Não complete partes ilegíveis.",
-                    "COMPARAÇÃO DE TELAS: compare duas interfaces fornecidas, apontando mudanças concretas de posição, tamanho e estado.",
-                    "ACESSIBILIDADE VISUAL: avalie contraste aparente, tamanho relativo dos textos e clareza dos controles sem inferir recursos invisíveis.",
-                    "ESPECIFICAÇÃO: transforme a imagem em uma lista curta de componentes e relações que a Coding AI possa implementar."
+                    "NEBULA OS — Reconhecimento de desktop: analise a captura e identifique barra superior, dock, menu de aplicativos, janelas, painel e área de trabalho. Separe observação de hipótese.",
+                    "NEBULA OS — Direção visual: avalie se a interface se aproxima visualmente de Linux desktop, macOS ou Windows. Justifique por elementos visíveis, sem afirmar que é um desses sistemas.",
+                    "NEBULA OS — Design de central de comando: avalie hierarquia de status, serviços, logs, alertas e controles. Proponha uma organização visual mais clara.",
+                    "NEBULA OS — GUI de configurações: examine agrupamento de categorias, navegação, controles, estados selecionados e consistência entre telas.",
+                    "NEBULA OS — Linguagem visual: compare transparência, sombras, bordas, cantos, tipografia, ícones e espaçamento. Diferencie o que está visível do que é inferido.",
+                    "NEBULA OS — Gerenciador de arquivos: avalie árvore lateral, breadcrumbs, lista/grade de arquivos, ações e estados vazios. Proponha melhorias específicas.",
+                    "NEBULA OS — Gerenciador de janelas: analise barra de título, botões de janela, foco, sobreposição e organização de múltiplas janelas.",
+                    "NEBULA OS — Tela de boot e login: avalie legibilidade, identidade visual, hierarquia e clareza dos estados de inicialização.",
+                    "NEBULA OS — Dashboard: avalie gráficos de CPU, RAM, armazenamento e rede. Verifique se unidades, rótulos e estados são compreensíveis.",
+                    "NEBULA OS — Acessibilidade: procure baixo contraste, textos pequenos, controles difíceis de distinguir e dependência exclusiva de cor.",
+                    "NEBULA OS — Comparação de versões: compare duas capturas e liste somente alterações visuais comprováveis de layout, tamanho, cor e estado.",
+                    "NEBULA OS — Especificação para Coding AI: transforme a captura em uma descrição implementável com componentes, relações espaciais, estilo e comportamento visível.",
+                    "NEBULA OS — Consistência: compare menu, dock e painel de configurações e identifique divergências na linguagem visual.",
+                    "NEBULA OS — Diagnóstico visual: encontre sobreposição, corte, desalinhamento ou excesso de elementos e indique região e evidência.",
+                    "NEBULA OS — Protótipo: descreva como reconstruir a tela em componentes reutilizáveis, incluindo estados normal, selecionado, desativado e carregando.",
+                    "NEBULA OS — Revisão final: produza uma auditoria visual da interface como produto de sistema operacional, priorizando os três problemas mais importantes."
+                ),
+                AgentRole.REASONING to listOf(
+                    "NEBULA OS — Pensamento em fases: decomponha a criação de um sistema operacional em requisitos, arquitetura, protótipo, implementação, integração e validação. Mostre dependências.",
+                    "NEBULA OS — Fundamentos: explique em linguagem simples a diferença entre kernel, processo, thread, serviço, driver, shell e ambiente desktop.",
+                    "NEBULA OS — Código básico: analise um programa C que lê um arquivo de configuração. Identifique riscos de ponteiro, validação, memória e retorno de erro.",
+                    "NEBULA OS — Fluxo de inicialização: raciocine sobre a sequência firmware, bootloader, kernel, init, serviços e sessão gráfica. Aponte o que varia entre distribuições.",
+                    "NEBULA OS — Diagnóstico: a central de comando mostra um serviço como ativo, mas a GUI não recebe dados. Liste hipóteses e escolha testes que diferenciem as causas.",
+                    "NEBULA OS — Arquitetura: compare implementar a GUI separada dos serviços versus concentrar tudo em um processo. Considere isolamento, manutenção e falhas.",
+                    "NEBULA OS — Memória: explique RAM, memória virtual, swap, cache e OOM. Analise como um desktop deve reagir sob pouca memória.",
+                    "NEBULA OS — Sistemas de arquivos: compare diretórios, permissões, links, montagem e espaço disponível. Resolva um cenário de erro de acesso.",
+                    "NEBULA OS — Redes: planeje como o sistema exibirá estado Wi-Fi, IP, DNS e conectividade sem confundir conexão local com acesso à internet.",
+                    "NEBULA OS — Raciocínio com evidências: receba logs incompletos de falha no boot. Separe fatos, hipóteses e informações ainda necessárias.",
+                    "NEBULA OS — Código C: explique passo a passo um programa pequeno com structs, funções, ponteiros e tratamento de erro; depois proponha testes de limite.",
+                    "NEBULA OS — Segurança: avalie por que a GUI não deve executar qualquer ação privilegiada diretamente. Proponha separação de privilégios e confirmação.",
+                    "NEBULA OS — Planejamento técnico: transforme uma ideia de dock, menu e central de comando em tarefas pequenas, ordenadas e verificáveis.",
+                    "NEBULA OS — Integração: Coding AI propõe uma API e Vision AI identifica um componente visual incompatível. Compare contratos e determine o que precisa ser ajustado.",
+                    "NEBULA OS — Pensamento crítico: uma tela parece indicar que o serviço iniciou, mas não há log. Explique por que aparência não comprova funcionamento e como verificar.",
+                    "NEBULA OS — Revisão de projeto: avalie uma proposta de OS com kernel Linux, serviços em C e GUI Kotlin. Identifique riscos, dependências, etapas e critérios de conclusão."
                 )
             )
             val restoredModes = savedCheckpoint?.selectedModes?.mapNotNull { (roleId, modeName) ->
