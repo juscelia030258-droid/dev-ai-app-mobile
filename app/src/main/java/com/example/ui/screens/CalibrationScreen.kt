@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -31,6 +32,8 @@ fun CalibrationScreen(
     state: CalibrationUiState,
     durations: Map<AgentRole, Int>,
     modes: Map<AgentRole, CalibrationMode>,
+    selectedAgents: Set<AgentRole>,
+    onAgentSelectionChange: (AgentRole, Boolean) -> Unit,
     onModeChange: (AgentRole, CalibrationMode) -> Unit,
     onDurationChange: (AgentRole, Int) -> Unit,
     onStart: () -> Unit,
@@ -54,6 +57,20 @@ fun CalibrationScreen(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Text("Selecione quais IAs deseja treinar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        agents.forEach { (role, detail, _) ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(role.displayName, modifier = Modifier.weight(1f))
+                Checkbox(
+                    checked = role in selectedAgents,
+                    onCheckedChange = { onAgentSelectionChange(role, it) },
+                    enabled = !state.isRunning && !state.isBenchmarkRunning
+                )
+            }
+        }
         agents.forEach { (role, detail, range) ->
             val minutes = durations[role] ?: 20
             val mode = modes[role] ?: CalibrationMode.NORMAL
@@ -145,7 +162,7 @@ fun CalibrationScreen(
                 Button(onClick = onResume, modifier = Modifier.fillMaxWidth()) { Text("Retomar sessão salva") }
                 OutlinedButton(onClick = onDiscardCheckpoint, modifier = Modifier.fillMaxWidth()) { Text("Descartar sessão salva") }
             }
-            Button(onClick = onStart, modifier = Modifier.fillMaxWidth(), enabled = !state.canResume) {
+            Button(onClick = onStart, modifier = Modifier.fillMaxWidth(), enabled = !state.canResume && selectedAgents.isNotEmpty()) {
                 Text(if (state.canResume) "Descarte a sessão para iniciar outra" else "Iniciar calibração completa")
             }
         }
