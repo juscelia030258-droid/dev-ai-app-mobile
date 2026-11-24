@@ -7,6 +7,7 @@ import com.example.core.model.RuntimeBackend
 import com.example.monitoring.data.LocalModelEntity
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -267,6 +268,8 @@ class LlamaCppRuntime(
                 prompt = formattedPrompt,
                 imagePath = imageUri
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             if (finished.compareAndSet(false, true)) {
                 send(InferenceStreamEvent.Failed(t.message ?: "Erro na execução llama.cpp"))
