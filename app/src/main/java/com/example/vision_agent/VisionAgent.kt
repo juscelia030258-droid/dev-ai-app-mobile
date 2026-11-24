@@ -158,14 +158,11 @@ class VisionAgent(
             params = params
         ).collect { ev ->
             when (ev) {
-                // Buffer vision tokens and publish one cleaned result at completion.
-                // This prevents a small VLM that restarts/repeats phrases from flooding the UI.
-                is InferenceStreamEvent.Token -> Unit
+                // Forward real tokens so the console visibly updates during inference.
+                // The final answer is cleaned before it replaces the temporary streamed text.
+                is InferenceStreamEvent.Token -> emit(ev)
                 is InferenceStreamEvent.Completed -> {
                     fullOutput = cleanVisualAnswer(ev.fullText)
-                    if (fullOutput.isNotBlank()) {
-                        emit(InferenceStreamEvent.Token(fullOutput))
-                    }
                     emit(ev.copy(fullText = fullOutput))
                 }
                 is InferenceStreamEvent.Failed -> {
