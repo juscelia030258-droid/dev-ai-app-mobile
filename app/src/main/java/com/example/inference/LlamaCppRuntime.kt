@@ -172,14 +172,14 @@ class LlamaCppRuntime(
         val model = currentModel
         val modelEvents = currentEventFlow
         if (helper == null || model == null || modelEvents == null) {
-            trySend(InferenceStreamEvent.Failed("Nenhum modelo GGUF carregado no runtime llama.cpp."))
+            send(InferenceStreamEvent.Failed("Nenhum modelo GGUF carregado no runtime llama.cpp."))
             close()
             return@callbackFlow
         }
 
         val imagePath = messages.lastOrNull { it.imagePath != null }?.imagePath
         if (imagePath != null && !model.supportsVision) {
-            trySend(InferenceStreamEvent.Failed("O modelo ${model.name} não possui projetor mmproj multimodal para visão."))
+            send(InferenceStreamEvent.Failed("O modelo ${model.name} não possui projetor mmproj multimodal para visão."))
             close()
             return@callbackFlow
         }
@@ -197,7 +197,7 @@ class LlamaCppRuntime(
                 if (finished.get()) return@collect
                 when (ev) {
                     is LlamaHelper.LLMEvent.Started -> {
-                        trySend(InferenceStreamEvent.Status("Inferência GGUF iniciada"))
+                        send(InferenceStreamEvent.Status("Inferência GGUF iniciada"))
                     }
                     is LlamaHelper.LLMEvent.Ongoing -> {
                         tokenCount = ev.tokenCount.coerceAtLeast(tokenCount + 1)
@@ -208,7 +208,7 @@ class LlamaCppRuntime(
                             accumulated.setLength(loopStart)
                             runCatching { helper.stopPrediction() }
                             val dur = System.currentTimeMillis() - startedAt
-                            trySend(
+                            send(
                                 InferenceStreamEvent.Completed(
                                     fullText = accumulated.toString().trim(),
                                     durationMs = dur,
@@ -217,12 +217,12 @@ class LlamaCppRuntime(
                             )
                             close()
                         } else if (!finished.get()) {
-                            trySend(InferenceStreamEvent.Token(ev.word))
+                            send(InferenceStreamEvent.Token(ev.word))
                         }
                         if (tokenCount >= maxTokensLimit && finished.compareAndSet(false, true)) {
                             runCatching { helper.stopPrediction() }
                             val dur = System.currentTimeMillis() - startedAt
-                            trySend(
+                            send(
                                 InferenceStreamEvent.Completed(
                                     fullText = accumulated.toString().trim(),
                                     durationMs = dur,
@@ -236,7 +236,7 @@ class LlamaCppRuntime(
                         if (finished.compareAndSet(false, true)) {
                             val finalText = ev.fullText.ifBlank { accumulated.toString() }
                             val dur = if (ev.duration > 0L) ev.duration else (System.currentTimeMillis() - startedAt)
-                            trySend(
+                            send(
                                 InferenceStreamEvent.Completed(
                                     fullText = finalText.trim(),
                                     durationMs = dur,
@@ -248,7 +248,7 @@ class LlamaCppRuntime(
                     }
                     is LlamaHelper.LLMEvent.Error -> {
                         if (finished.compareAndSet(false, true)) {
-                            trySend(InferenceStreamEvent.Failed(ev.message))
+                            send(InferenceStreamEvent.Failed(ev.message))
                             close()
                         }
                     }
@@ -269,7 +269,7 @@ class LlamaCppRuntime(
             )
         } catch (t: Throwable) {
             if (finished.compareAndSet(false, true)) {
-                trySend(InferenceStreamEvent.Failed(t.message ?: "Erro na execução llama.cpp"))
+                send(InferenceStreamEvent.Failed(t.message ?: "Erro na execução llama.cpp"))
                 close()
             }
         }
