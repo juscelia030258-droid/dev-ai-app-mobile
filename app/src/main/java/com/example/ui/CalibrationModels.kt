@@ -3,9 +3,11 @@ package com.example.ui
 import com.example.core.model.AgentRole
 
 enum class CalibrationMode(val title: String, val description: String) {
-    NORMAL("Normal", "Fundamentos e exercícios graduais"),
-    ADVANCED("Avançado", "Problemas práticos e projetos mais difíceis"),
-    ULTIMATE("Ultimate", "Desafio especial de 5 horas")
+    NORMAL("Normal", "Fundamentos, exemplos e exercícios graduais"),
+    ADVANCED("Avançado", "Projetos completos, integração e desafios mais difíceis"),
+    ANALYSIS("Análise", "Investigar problemas, separar fatos de hipóteses e localizar causas"),
+    CORRECTION("Correção", "Encontrar erros, corrigir soluções e explicar as mudanças"),
+    ULTIMATE("Ultimate", "Desafio especial de 5 horas, dividido em cinco etapas")
 }
 
 data class CalibrationUiState(
