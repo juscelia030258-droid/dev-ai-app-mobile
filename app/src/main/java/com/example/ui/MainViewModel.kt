@@ -803,14 +803,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             role == AgentRole.VISION -> visionStage[ultimateHour] + " "
                             else -> ""
                         }
-                        val prompt = if (isLinuxFinalHour) {
+                        val modeGuidance = when (mode) {
+                            CalibrationMode.NORMAL ->
+                                "MODO NORMAL: resolva o exercício de forma gradual. Mostre os fundamentos necessários, use palavras simples e explique somente o que ajuda a entender a solução."
+                            CalibrationMode.ADVANCED -> when (role) {
+                                AgentRole.CODING ->
+                                    "MODO AVANÇADO: trate o exercício como parte de um projeto real. Considere arquitetura, módulos, compatibilidade, tratamento de erros, estados de borda, testes e manutenção. Entregue uma solução completa, mas sem criar complexidade desnecessária."
+                                AgentRole.REASONING ->
+                                    "MODO AVANÇADO: compare pelo menos duas abordagens viáveis, avalie dependências, riscos e consequências. Escolha uma opção com justificativa e defina como verificar se ela funcionou."
+                                AgentRole.VISION ->
+                                    "MODO AVANÇADO: faça uma auditoria detalhada da interface. Avalie hierarquia, alinhamento, espaçamento, tipografia, contraste, estados e consistência; transforme os achados em mudanças visuais implementáveis."
+                            }
+                            CalibrationMode.ANALYSIS -> when (role) {
+                                AgentRole.CODING ->
+                                    "MODO ANÁLISE: não comece escrevendo a solução. Investigue requisitos, fluxo de dados, estrutura, dependências e possíveis falhas. Separe fatos de hipóteses, indique a causa mais provável e proponha testes que confirmem ou descartem cada hipótese."
+                                AgentRole.REASONING ->
+                                    "MODO ANÁLISE: decomponha o problema em fatos, incógnitas, hipóteses e relações causais. Procure contradições, compare evidências e explique qual informação ou teste reduziria mais a incerteza. Não aceite a primeira hipótese automaticamente."
+                                AgentRole.VISION ->
+                                    "MODO ANÁLISE: examine a imagem por regiões. Registre apenas elementos realmente visíveis, relações espaciais, estados e inconsistências. Separe observação, interpretação e dúvida; não proponha mudanças antes de identificar evidências."
+                            }
+                            CalibrationMode.CORRECTION -> when (role) {
+                                AgentRole.CODING ->
+                                    "MODO CORREÇÃO: trate a proposta, código ou arquitetura como possivelmente defeituosa. Localize erros concretos, explique a causa, apresente a versão corrigida e inclua testes de regressão. Não altere partes sem relação com o defeito."
+                                AgentRole.REASONING ->
+                                    "MODO CORREÇÃO: revise criticamente a conclusão ou plano. Encontre saltos lógicos, premissas sem prova, cálculos ou prioridades incorretos; corrija cada ponto e apresente uma conclusão coerente com as evidências."
+                                AgentRole.VISION ->
+                                    "MODO CORREÇÃO: identifique defeitos visuais comprováveis, localize cada um na tela e descreva a correção específica. Preserve os elementos que já funcionam e não invente defeitos que a imagem não mostra."
+                            }
+                            CalibrationMode.ULTIMATE ->
+                                "MODO ULTIMATE: trabalhe como um desafio de projeto em etapas. Integre os conhecimentos da etapa atual, confira dependências e apresente critérios verificáveis."
+                        }
+                        val repeatedChallenge = if (cycle == 0) "" else
+                            "Crie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
+                        val taskPrompt = if (isLinuxFinalHour) {
                             "DESAFIO FINAL LINUX: use somente o projeto de laboratório e os arquivos que forem fornecidos nesta tarefa. " +
                                 "Mapeie a estrutura, analise scripts, serviços, permissões e dependências; encontre erros; proponha melhorias; " +
                                 "reescreva apenas módulos selecionados e crie testes. Não afirme que analisou uma distribuição inteira nem que executou comandos. " +
                                 "Tarefa: " + basePrompt
-                        } else if (cycle == 0) stagePrefix + basePrompt else {
-                            stagePrefix + basePrompt + "\n\nCrie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
+                        } else {
+                            basePrompt
                         }
+                        val prompt = listOf(stagePrefix.trim(), modeGuidance, taskPrompt, repeatedChallenge)
+                            .filter { it.isNotBlank() }
+                            .joinToString("\n\n")
                         _calibrationState.value = _calibrationState.value.copy(
                             currentCase = role.displayName + " (" + mode.title + "): exercício " + (attempt + 1) +
                                 if (mode == CalibrationMode.ULTIMATE) " — ciclo " + (cycle + 1) else "",
