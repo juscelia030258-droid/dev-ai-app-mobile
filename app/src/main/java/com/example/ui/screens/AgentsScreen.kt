@@ -556,7 +556,7 @@ fun AgentsScreen(
                     if (consoleState.lastPrompt.isNotBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Mensagem enviada: " + consoleState.lastPrompt,
+                            text = "Mensagem enviada ao Console: " + consoleState.lastPrompt,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
