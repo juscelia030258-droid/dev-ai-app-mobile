@@ -163,7 +163,12 @@ class VisionAgent(
                 is InferenceStreamEvent.Token -> emit(ev)
                 is InferenceStreamEvent.Completed -> {
                     fullOutput = cleanVisualAnswer(ev.fullText)
-                    emit(ev.copy(fullText = fullOutput))
+                    if (fullOutput.isBlank()) {
+                        lastError = "Vision AI concluiu sem produzir texto."
+                        emit(InferenceStreamEvent.Failed(lastError!!))
+                    } else {
+                        emit(ev.copy(fullText = fullOutput))
+                    }
                 }
                 is InferenceStreamEvent.Failed -> {
                     lastError = ev.errorMessage
