@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -97,6 +98,7 @@ fun AgentsScreen(
     onSelectVisionImage: (Uri?) -> Unit,
     onRunPrompt: (AgentRole, String) -> Unit,
     onStopPrompt: (AgentRole) -> Unit,
+    onClearConsole: (AgentRole) -> Unit,
     onBannerMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -150,7 +152,9 @@ fun AgentsScreen(
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -524,13 +528,25 @@ fun AgentsScreen(
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                onClearConsole(selectedRole)
+                                promptInput = ""
+                            },
+                            modifier = Modifier.testTag("agent_clear_console_" + selectedRole.id)
+                        ) {
+                            Text("Limpar")
+                        }
                         Button(
                             onClick = {
                                 if (consoleState.isGenerating) onStopPrompt(selectedRole)
                                 else onRunPrompt(selectedRole, promptInput)
                             },
-                            enabled = currentConfig.enabled && (consoleState.isGenerating || promptInput.isNotBlank()),
+                            enabled = if (consoleState.isGenerating) true else currentConfig.enabled && promptInput.isNotBlank(),
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("agent_run_button_${selectedRole.id}"),
