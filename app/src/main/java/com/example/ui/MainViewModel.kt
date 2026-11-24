@@ -442,14 +442,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 
     // --- AI Calibration Lab ---
-    private val _selectedCalibrationRoles = MutableStateFlow(AgentRole.entries.toSet())
+    private val calibrationPreferences = application.getSharedPreferences("sace_progress", 0)
+    private val _selectedCalibrationRoles = MutableStateFlow(
+        calibrationPreferences.getStringSet("selected_agent_roles_v1", null)
+            ?.mapNotNull { id -> AgentRole.entries.firstOrNull { it.id == id } }
+            ?.toSet()
+            ?.takeIf { it.isNotEmpty() }
+            ?: AgentRole.entries.toSet()
+    )
     val selectedCalibrationRoles: StateFlow<Set<AgentRole>> = _selectedCalibrationRoles.asStateFlow()
 
     fun setCalibrationAgentSelected(role: AgentRole, selected: Boolean) {
-        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
-        _selectedCalibrationRoles.value = _selectedCalibrationRoles.value.toMutableSet().apply {
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning ||
+            _calibrationState.value.canResume) return
+        val updated = _selectedCalibrationRoles.value.toMutableSet().apply {
             if (selected) add(role) else remove(role)
         }
+        _selectedCalibrationRoles.value = updated
+        calibrationPreferences.edit()
+            .putStringSet("selected_agent_roles_v1", updated.map { it.id }.toSet())
+            .apply()
     }
 
     private val _calibrationDurations = MutableStateFlow(
