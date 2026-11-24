@@ -329,6 +329,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             onSelectVisionImage = viewModel::setVisionImageUri,
                             onRunPrompt = viewModel::runAgentConsolePrompt,
                             onStopPrompt = viewModel::stopAgentConsole,
+                            onClearConsole = viewModel::clearAgentConsole,
                             onBannerMessage = viewModel::showBanner
                         )
                     }
