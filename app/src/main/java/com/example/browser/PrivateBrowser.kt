@@ -101,6 +101,7 @@ class PrivateBrowser(context: Context) {
         }
         val scheme = uri.scheme?.lowercase(Locale.ROOT)
         require(scheme == "https" || scheme == "http") { "O navegador aceita somente URLs HTTP ou HTTPS." }
+        require(uri.userInfo == null) { "URLs com credenciais embutidas são bloqueadas." }
         val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.')
             ?: throw IllegalArgumentException("A URL não possui um host válido.")
         require(host.isNotBlank() && host != "localhost" && !host.endsWith(".localhost")) {
@@ -124,6 +125,9 @@ class PrivateBrowser(context: Context) {
         val host = uri.host?.lowercase(Locale.ROOT)?.trimEnd('.')
             ?: return "Host ausente ou inválido; não confiar."
         if (uri.userInfo != null) return "URL contém credenciais embutidas; suspeita."
+        if (host.split('.').any { it.startsWith("xn--") }) {
+            return "Domínio usa IDN/punycode; conferir cuidadosamente para evitar imitação visual."
+        }
         if (uri.scheme?.lowercase(Locale.ROOT) != "https") {
             return "Não usa HTTPS; não classificar como domínio confiável."
         }
