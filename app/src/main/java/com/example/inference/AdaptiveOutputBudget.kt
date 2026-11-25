@@ -24,14 +24,14 @@ object AdaptiveOutputBudget {
             ?.text.orEmpty().lowercase()
         val codeTask = listOf(
             "código", "codigo", "implemente", "implementar", "program", "debug", "depurar",
-            "corrija", "corrigir", "refator", "classe", "função", "funcao", "script",
+            "corrija", "corrigir", "conserte", "arrume", "crie", "desenvolva", "construir", "refator", "classe", "função", "funcao", "script",
             "arquivo completo", "projeto", "api", "kotlin", "python", "c++", "html", "sql"
         ).any(request::contains) || request.contains("```")
 
         val detailedTask = codeTask || listOf(
             "explique detalhadamente", "explicação completa", "explicacao completa",
             "passo a passo", "análise completa", "analise completa", "compare detalhadamente",
-            "em detalhes", "mais detalhes", "por que", "como funciona"
+            "em detalhes", "mais detalhes", "resposta completa", "explique", "explica", "detalhe", "descreva", "por que", "como funciona"
         ).any(request::contains)
 
         if (!detailedTask) return base
