@@ -189,7 +189,7 @@ class VisionAgent(
                 source = source,
                 modelIdUsed = model.name,
                 promptPreview = messages.lastOrNull()?.text.orEmpty().take(180),
-                responsePreview = (fullOutput.ifBlank { lastError.orEmpty() }).take(280),
+                responsePreview = (fullOutput.ifBlank { lastError.orEmpty() }).take(20_000),
                 hasImage = true,
                 durationMs = System.currentTimeMillis() - startTime,
                 success = lastError == null,
