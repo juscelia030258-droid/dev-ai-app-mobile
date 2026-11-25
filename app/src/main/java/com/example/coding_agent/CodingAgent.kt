@@ -161,7 +161,7 @@ class CodingAgent(
                 source = source,
                 modelIdUsed = model.name,
                 promptPreview = messages.lastOrNull()?.text.orEmpty().take(180),
-                responsePreview = (fullOutput.ifBlank { lastError.orEmpty() }).take(280),
+                responsePreview = (fullOutput.ifBlank { lastError.orEmpty() }).take(20_000),
                 hasImage = false,
                 durationMs = System.currentTimeMillis() - startTime,
                 success = lastError == null,
