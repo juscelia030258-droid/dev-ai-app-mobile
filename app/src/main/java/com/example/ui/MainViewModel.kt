@@ -145,6 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiBannerMessage: StateFlow<String?> = _uiBannerMessage.asStateFlow()
 
     private val consoleJobs = mutableMapOf<AgentRole, Job>()
+    private var multiAgentUiJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -1330,25 +1331,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // --- Multi-Agent Orchestrator ---
     fun setMultiAgentImageUri(uri: Uri?) {
         viewModelScope.launch(Dispatchers.IO) {
+            // Publish the URI only after its private cache copy is ready. This prevents
+            // an immediate Run tap from submitting the previous image path (or no image).
+            val copiedPath = uri?.let { copyImageToCache(it, "multiagent_input") }
+            _multiAgentImagePath.value = copiedPath
             _multiAgentImageUri.value = uri
-            _multiAgentImagePath.value = uri?.let { copyImageToCache(it, "multiagent_input") }
+            if (uri != null && copiedPath == null) {
+                _uiBannerMessage.value = "Não foi possível preparar a imagem. Selecione-a novamente antes de executar."
+            }
         }
     }
 
     fun runMultiAgentTask(prompt: String) {
-        if (prompt.isBlank()) return
-        viewModelScope.launch {
-            InferenceTaskForegroundService.startTask(getApplication())
+        val normalizedPrompt = prompt.trim()
+        if (normalizedPrompt.isBlank()) {
+            _uiBannerMessage.value = "Digite uma tarefa antes de iniciar o Multiagente."
+            return
+        }
+        if (_multiAgentImageUri.value != null && _multiAgentImagePath.value == null) {
+            _uiBannerMessage.value = "A imagem ainda não está pronta ou não pôde ser copiada. Selecione-a novamente."
+            return
+        }
+        if (multiAgentUiJob?.isActive == true || multiAgentLiveState.value.isRunning) {
+            _uiBannerMessage.value = "O Multiagente já está executando uma tarefa."
+            return
+        }
+
+        val submittedImagePath = _multiAgentImagePath.value
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val thisJob = currentCoroutineContext()[Job]
+            var taskStarted = false
             try {
-                container.multiAgentOrchestrator.executeMultiAgentTask(
-                    userRequest = prompt.trim(),
-                    imagePath = _multiAgentImagePath.value,
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
+                val result = container.multiAgentOrchestrator.executeMultiAgentTask(
+                    userRequest = normalizedPrompt,
+                    imagePath = submittedImagePath,
                     source = "UI"
                 )
+                val failure = result.exceptionOrNull()
+                if (failure != null && failure !is CancellationException) {
+                    val detail = failure.message?.takeIf { it.isNotBlank() } ?: "erro desconhecido"
+                    // Validation failures can be returned before the orchestrator updates
+                    // its live state, so surface them here instead of silently ignoring Result.
+                    if (multiAgentLiveState.value.error != detail) {
+                        _uiBannerMessage.value = "Multiagente não concluiu a tarefa: $detail"
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.java.simpleName
+                _uiBannerMessage.value = "Falha ao iniciar o Multiagente: $detail"
             } finally {
-                InferenceTaskForegroundService.finishTask(getApplication())
+                if (taskStarted) {
+                    runCatching { InferenceTaskForegroundService.finishTask(getApplication()) }
+                }
+                if (multiAgentUiJob === thisJob) {
+                    multiAgentUiJob = null
+                }
             }
         }
+        // Lazy start makes the duplicate-submission guard effective even on rapid taps.
+        multiAgentUiJob = job
+        job.start()
     }
 
     fun cancelMultiAgentTask() {
