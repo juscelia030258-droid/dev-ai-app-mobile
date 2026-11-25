@@ -657,6 +657,7 @@ fun AgentsScreen(
                 }
             } else {
                 items(roleHistory.take(15), key = { it.id }) { item ->
+                    var historyExpanded by remember(item.id) { mutableStateOf(false) }
                     ObsidianCard {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -682,8 +683,15 @@ fun AgentsScreen(
                         Text(
                             text = item.responsePreview,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (historyExpanded) Int.MAX_VALUE else 6,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (item.responsePreview.length > 400) {
+                            TextButton(onClick = { historyExpanded = !historyExpanded }) {
+                                Text(if (historyExpanded) "Recolher resposta" else "Abrir resposta completa")
+                            }
+                        }
                     }
                 }
             }
