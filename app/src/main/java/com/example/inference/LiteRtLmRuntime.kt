@@ -37,6 +37,7 @@ class LiteRtLmRuntime(
     private var engine: Engine? = null
     private var currentModel: LocalModelEntity? = null
     private var loadedContextLength: Int = 0
+    private var loadedThreadCount: Int = 0
 
     override val loadedModelId: String?
         get() = currentModel?.id
@@ -51,11 +52,13 @@ class LiteRtLmRuntime(
                 "Arquivo .litertlm não encontrado em ${model.filePath}"
             }
             val targetCtx = params.contextLength.coerceIn(512, 8192)
+            val targetThreads = params.threads.coerceIn(1, 6)
 
             if (
                 currentModel?.id == model.id &&
                 currentModel?.supportsVision == model.supportsVision &&
                 loadedContextLength == targetCtx &&
+                loadedThreadCount == targetThreads &&
                 engine != null
             ) {
                 return@runCatching
@@ -65,7 +68,7 @@ class LiteRtLmRuntime(
 
             val primaryBackend = when (backend) {
                 RuntimeBackend.LITERT_LM_GPU -> Backend.GPU()
-                else -> Backend.CPU(threadCount = params.threads.coerceIn(1, 6))
+                else -> Backend.CPU(threadCount = targetThreads)
             }
 
             val createdEngine = try {
@@ -84,7 +87,8 @@ class LiteRtLmRuntime(
                 val cpuFallbackConfig = EngineConfig(
                     modelPath = file.absolutePath,
                     backend = primaryBackend,
-                    visionBackend = Backend.CPU(threadCount = params.threads.coerceIn(1, 6)),
+                    visionBackend = Backend.CPU(threadCount = targetThreads),
+
                     maxNumTokens = targetCtx,
                     maxNumImages = 2,
                     cacheDir = context.cacheDir.absolutePath
@@ -96,6 +100,7 @@ class LiteRtLmRuntime(
             engine = createdEngine
             currentModel = model
             loadedContextLength = targetCtx
+            loadedThreadCount = targetThreads
         }
     }
 
@@ -110,6 +115,7 @@ class LiteRtLmRuntime(
         engine = null
         currentModel = null
         loadedContextLength = 0
+        loadedThreadCount = 0
         if (existing != null) {
             runCatching { existing.close() }
         }

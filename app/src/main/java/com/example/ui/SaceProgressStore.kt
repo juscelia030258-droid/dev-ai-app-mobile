@@ -13,7 +13,10 @@ data class SaceCheckpoint(
     val mode: String,
     val nextAttempt: Int,
     val startedAt: Long,
-    val sessionNumber: Int
+    val sessionNumber: Int,
+    val selectedModes: Map<String, String> = emptyMap(),
+    val selectedDurations: Map<String, Int> = emptyMap(),
+    val elapsedMs: Long = 0L
 )
 
 class SaceProgressStore(context: Context) {
@@ -22,7 +25,7 @@ class SaceProgressStore(context: Context) {
 
     fun beginSession(): Int = synchronized(lock) {
         val next = prefs.getInt(KEY_SESSION_COUNT, 0) + 1
-        prefs.edit().putInt(KEY_SESSION_COUNT, next).apply()
+        check(prefs.edit().putInt(KEY_SESSION_COUNT, next).commit()) { "Não foi possível salvar o número da sessão SACE." }
         next
     }
 
@@ -67,6 +70,32 @@ class SaceProgressStore(context: Context) {
         }
     }
 
+    /**
+     * Returns a short, evidence-based reminder for spaced repetition.
+     * Weak or failed topics return with a changed scenario and previous review feedback.
+     */
+    fun reinforcementHint(roleId: String, exerciseIndex: Int): String? = synchronized(lock) {
+        val exerciseId = "$roleId:$exerciseIndex"
+        val attempts = readAttempts()
+        val previous = (0 until attempts.length()).asSequence()
+            .mapNotNull { attempts.optJSONObject(it) }
+            .lastOrNull { it.optString("role") == roleId && it.optString("exerciseId") == exerciseId }
+            ?: return@synchronized null
+        val score = previous.optInt("qualityScore", -1)
+        val completed = previous.optBoolean("completed", false)
+        if (completed && score >= 85) return@synchronized null
+
+        val feedback = previous.optString("evaluationFeedback").ifBlank {
+            previous.optString("error")
+        }.take(500)
+        buildString {
+            append("REVISÃO ESPAÇADA — este assunto já foi praticado, mas precisa ser reforçado.")
+            if (score in 0..100) append(" Última nota estimada: $score/100.")
+            if (feedback.isNotBlank()) append(" Ponto anterior a revisar: ").append(feedback)
+            append(" Resolva um cenário diferente, explique o princípio por trás da solução e corrija o ponto fraco sem copiar uma resposta anterior.")
+        }
+    }
+
     fun recordAttempt(
         roleId: String,
         exerciseIndex: Int,
@@ -79,20 +108,29 @@ class SaceProgressStore(context: Context) {
         evaluationFeedback: String? = null
     ) = synchronized(lock) {
         val attempts = readAttempts()
-        attempts.put(
-            JSONObject()
-                .put("role", roleId)
-                .put("index", exerciseIndex)
-                .put("exerciseId", "$roleId:$exerciseIndex")
-                .put("skill", skill.take(80))
-                .put("completed", completed)
-                .put("outputChars", outputChars.coerceAtLeast(0))
-                .put("error", error.orEmpty().take(180))
-                .put("qualityScore", qualityScore?.coerceIn(0, 100) ?: -1)
-                .put("evaluationConfidence", evaluationConfidence?.coerceIn(0, 100) ?: -1)
-                .put("evaluationFeedback", evaluationFeedback.orEmpty().take(240))
-                .put("time", System.currentTimeMillis())
-        )
+        val exerciseId = "$roleId:$exerciseIndex"
+        val updatedRecord = JSONObject()
+            .put("role", roleId)
+            .put("index", exerciseIndex)
+            .put("exerciseId", exerciseId)
+            .put("skill", skill.take(80))
+            .put("completed", completed)
+            .put("outputChars", outputChars.coerceAtLeast(0))
+            .put("error", error.orEmpty().take(180))
+            .put("qualityScore", qualityScore?.coerceIn(0, 100) ?: -1)
+            .put("evaluationConfidence", evaluationConfidence?.coerceIn(0, 100) ?: -1)
+            .put("evaluationFeedback", evaluationFeedback.orEmpty().take(240))
+            .put("time", System.currentTimeMillis())
+
+        // A retry from the same agent and curriculum source updates the same exercise.
+        // This prevents one failed attempt followed by a successful retry from counting twice.
+        val existingIndex = (0 until attempts.length()).lastOrNull { index ->
+            val item = attempts.optJSONObject(index) ?: return@lastOrNull false
+            item.optString("role") == roleId && item.optString("exerciseId") == exerciseId
+        }
+        if (existingIndex != null) attempts.put(existingIndex, updatedRecord)
+        else attempts.put(updatedRecord)
+
         while (attempts.length() > MAX_ATTEMPTS) attempts.remove(0)
         prefs.edit().putString(KEY_ATTEMPTS, attempts.toString()).apply()
     }
@@ -111,7 +149,7 @@ class SaceProgressStore(context: Context) {
             val old = skills[skill] ?: (0 to 0)
             skills[skill] = if (success) (old.first + 1 to old.second) else (old.first to old.second + 1)
         }
-        val skillText = skills.entries.takeLast(5).joinToString("; ") { (name, counts) ->
+        val skillText = skills.entries.toList().takeLast(5).joinToString("; ") { (name, counts) ->
             "$name: ${counts.first} concluídos/${counts.second} falhas"
         }
         val evaluated = (0 until attempts.length()).mapNotNull { attempts.optJSONObject(it) }
@@ -122,15 +160,34 @@ class SaceProgressStore(context: Context) {
             if (skillText.isNotBlank()) " Áreas recentes: $skillText." else ""
     }
 
-    fun saveCheckpoint(roleId: String, mode: String, nextAttempt: Int, startedAt: Long, sessionNumber: Int) {
+    fun saveCheckpoint(
+        roleId: String,
+        mode: String,
+        nextAttempt: Int,
+        startedAt: Long,
+        sessionNumber: Int,
+        selectedModes: Map<String, String> = emptyMap(),
+        selectedDurations: Map<String, Int> = emptyMap(),
+        elapsedMs: Long = 0L
+    ) {
+        val modesJson = JSONObject()
+        selectedModes.forEach { (role, value) -> modesJson.put(role, value) }
+        val durationsJson = JSONObject()
+        selectedDurations.forEach { (role, value) -> durationsJson.put(role, value.coerceIn(1, 300)) }
         val checkpoint = JSONObject()
             .put("role", roleId)
             .put("mode", mode)
             .put("nextAttempt", nextAttempt.coerceAtLeast(0))
             .put("startedAt", startedAt)
             .put("session", sessionNumber)
+            .put("selectedModes", modesJson)
+            .put("selectedDurations", durationsJson)
+            .put("elapsedMs", elapsedMs.coerceAtLeast(0L))
             .put("savedAt", System.currentTimeMillis())
-        prefs.edit().putString(KEY_CHECKPOINT, checkpoint.toString()).apply()
+        // This small checkpoint must reach disk before an expensive inference starts.
+        check(prefs.edit().putString(KEY_CHECKPOINT, checkpoint.toString()).commit()) {
+            "Não foi possível salvar o checkpoint do SACE."
+        }
     }
 
     fun readCheckpoint(): SaceCheckpoint? = synchronized(lock) {
@@ -143,16 +200,53 @@ class SaceProgressStore(context: Context) {
             mode = mode,
             nextAttempt = json.optInt("nextAttempt", 0).coerceAtLeast(0),
             startedAt = json.optLong("startedAt", System.currentTimeMillis()),
-            sessionNumber = json.optInt("session", 0).coerceAtLeast(0)
+            sessionNumber = json.optInt("session", 0).coerceAtLeast(0),
+            selectedModes = json.optJSONObject("selectedModes")?.let { modes ->
+                buildMap {
+                    modes.keys().forEach { key ->
+                        val value = modes.optString(key)
+                        if (key in setOf("coding", "reasoning", "vision") && value in CalibrationMode.entries.map { it.name }) {
+                            put(key, value)
+                        }
+                    }
+                }
+            }.orEmpty(),
+            selectedDurations = json.optJSONObject("selectedDurations")?.let { durations ->
+                buildMap {
+                    durations.keys().forEach { key ->
+                        if (key in setOf("coding", "reasoning", "vision")) {
+                            val value = durations.optInt(key, -1)
+                            if (value in 1..300) put(key, value)
+                        }
+                    }
+                }
+            }.orEmpty(),
+            elapsedMs = json.optLong("elapsedMs", (System.currentTimeMillis() - json.optLong("startedAt", System.currentTimeMillis())).coerceAtLeast(0L)).coerceAtLeast(0L)
         )
     }
 
     fun clearCheckpoint() {
-        prefs.edit().remove(KEY_CHECKPOINT).apply()
+        check(prefs.edit().remove(KEY_CHECKPOINT).commit()) { "Não foi possível limpar o checkpoint do SACE." }
     }
 
-    private fun readAttempts(): JSONArray =
-        runCatching { JSONArray(prefs.getString(KEY_ATTEMPTS, "[]")) }.getOrDefault(JSONArray())
+    private fun readAttempts(): JSONArray {
+        val stored = runCatching { JSONArray(prefs.getString(KEY_ATTEMPTS, "[]")) }.getOrDefault(JSONArray())
+        // Collapse legacy duplicate retries, keeping only the newest result for each
+        // agent + exercise pair so older histories are corrected when read.
+        val latestByExercise = linkedMapOf<String, JSONObject>()
+        for (index in 0 until stored.length()) {
+            val item = stored.optJSONObject(index) ?: continue
+            val role = item.optString("role")
+            val exerciseId = item.optString("exerciseId").ifBlank {
+                "$role:${item.optInt("index", -1)}"
+            }
+            if (role.isBlank() || exerciseId.endsWith(":-1")) continue
+            val key = "$role|$exerciseId"
+            latestByExercise.remove(key)
+            latestByExercise[key] = item
+        }
+        return JSONArray().apply { latestByExercise.values.forEach { put(it) } }
+    }
 
     companion object {
         private const val KEY_SESSION_COUNT = "session_count"

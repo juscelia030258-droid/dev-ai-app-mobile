@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -32,6 +34,20 @@ class LocalApiForegroundService : Service() {
     private var monitorJob: Job? = null
     private var memoryMaintenanceJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val wakeLockRenewal = object : Runnable {
+        override fun run() {
+            val lock = wakeLock ?: return
+            if (!lock.isHeld) return
+            runCatching {
+                lock.release()
+                lock.acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
+            if (wakeLock?.isHeld == true) {
+                mainHandler.postDelayed(this, WAKE_LOCK_RENEW_INTERVAL_MS)
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -170,15 +186,22 @@ class LocalApiForegroundService : Service() {
         runCatching {
             if (wakeLock == null) {
                 val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LocalDevAI::ApiServerWakeLock")
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LocalDevAI::ApiServerWakeLock").apply {
+                    setReferenceCounted(false)
+                }
             }
             if (wakeLock?.isHeld == false) {
-                wakeLock?.acquire(6 * 60 * 60 * 1000L)
+                wakeLock?.acquire(WAKE_LOCK_TIMEOUT_MS)
             }
+        }
+        mainHandler.removeCallbacks(wakeLockRenewal)
+        if (wakeLock?.isHeld == true) {
+            mainHandler.postDelayed(wakeLockRenewal, WAKE_LOCK_RENEW_INTERVAL_MS)
         }
     }
 
     private fun releaseWakeLock() {
+        mainHandler.removeCallbacks(wakeLockRenewal)
         runCatching {
             if (wakeLock?.isHeld == true) wakeLock?.release()
         }
@@ -199,6 +222,8 @@ class LocalApiForegroundService : Service() {
         const val ACTION_STOP_SERVER = "com.example.action.STOP_API_SERVER"
         const val EXTRA_PORT = "extra_port"
         private const val MEMORY_MAINTENANCE_INTERVAL_MS = 15_000L
+        private const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
+        private const val WAKE_LOCK_RENEW_INTERVAL_MS = 5 * 60 * 60 * 1000L
 
         fun startServerService(context: Context, port: Int? = null) {
             val intent = Intent(context, LocalApiForegroundService::class.java).apply {

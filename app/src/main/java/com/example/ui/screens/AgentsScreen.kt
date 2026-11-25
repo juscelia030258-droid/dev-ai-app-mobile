@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -60,6 +61,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.minimumInteractiveComponentSize
 import coil.compose.AsyncImage
@@ -97,6 +99,7 @@ fun AgentsScreen(
     onSelectVisionImage: (Uri?) -> Unit,
     onRunPrompt: (AgentRole, String) -> Unit,
     onStopPrompt: (AgentRole) -> Unit,
+    onClearConsole: (AgentRole) -> Unit,
     onBannerMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -113,6 +116,7 @@ fun AgentsScreen(
     val (stateLabel, stateColor) = runtimeStateLabel(rtState)
 
     var promptInput by remember(selectedRole) { mutableStateOf("") }
+    var outputExpanded by remember(selectedRole) { mutableStateOf(false) }
     var customSystemPrompt by remember(selectedRole, currentConfig.systemPromptOverride) {
         mutableStateOf(currentConfig.systemPromptOverride.orEmpty().replace("[CODING_REASONING_PROFILE]", "").trim())
     }
@@ -150,7 +154,9 @@ fun AgentsScreen(
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -312,6 +318,7 @@ fun AgentsScreen(
                             modifier = Modifier.padding(top = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Text("Ajustam como o modelo gera respostas. São parâmetros de geração, não configurações físicas do celular.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             SettingsSliderRow(
                                 label = "Temperatura",
                                 valueText = "%.2f".format(currentConfig.temperature),
@@ -321,6 +328,7 @@ fun AgentsScreen(
                                 },
                                 valueRange = 0.0f..1.2f
                             )
+                            Text("Temperatura: controla a variação das respostas. Baixa = mais previsível; alta = mais variedade. Não é a temperatura do aparelho.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                             SettingsSliderRow(
                                 label = "Janela de Contexto",
@@ -331,6 +339,7 @@ fun AgentsScreen(
                                 },
                                 valueRange = 1024f..8192f
                             )
+                            Text("Contexto: quantidade de tokens que o modelo pode considerar na conversa. Aumentar permite mais histórico, mas consome mais RAM.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                             SettingsSliderRow(
                                 label = "Limite de saída (Max Tokens)",
@@ -342,6 +351,7 @@ fun AgentsScreen(
                                 valueRange = 256f..4096f,
                                 modifier = Modifier.testTag("agent_max_tokens_slider_${selectedRole.id}")
                             )
+                            Text("Max Tokens: limite máximo de texto que a IA pode gerar em uma resposta. Mais tokens permitem respostas longas e aumentam tempo de processamento.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                             SettingsSliderRow(
                                 label = "Top-P (Amostragem Nuclear)",
@@ -353,6 +363,7 @@ fun AgentsScreen(
                                 valueRange = 0.1f..1.0f,
                                 modifier = Modifier.testTag("agent_top_p_slider_${selectedRole.id}")
                             )
+                            Text("Top-P: limita a escolha aos tokens que somam a probabilidade configurada. Valores menores tendem a deixar a resposta mais focada.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                             SettingsSliderRow(
                                 label = "Top-K",
@@ -364,6 +375,7 @@ fun AgentsScreen(
                                 valueRange = 5f..100f,
                                 modifier = Modifier.testTag("agent_top_k_slider_${selectedRole.id}")
                             )
+                            Text("Top-K: considera apenas os K próximos tokens mais prováveis. Valores baixos reduzem as opções; altos dão mais variedade.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                             SettingsSliderRow(
                                 label = "Threads CPU ARM64",
@@ -375,6 +387,7 @@ fun AgentsScreen(
                                 valueRange = 1f..6f,
                                 steps = 4
                             )
+                            Text("Threads CPU: quantas tarefas de processamento o runtime usa em paralelo. Mais threads podem acelerar, mas também aumentam uso de CPU, energia e aquecimento. Comece com 3 ou 4.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                             if (selectedRole == AgentRole.CODING) {
                                 FilterChip(
@@ -389,6 +402,7 @@ fun AgentsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            Text("System Prompt: instruções permanentes que definem o papel, o foco e as regras da IA. Não ensina pesos novos; orienta as respostas.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(modifier = Modifier.height(4.dp))
                             OutlinedTextField(
                                 value = customSystemPrompt,
@@ -516,13 +530,25 @@ fun AgentsScreen(
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                onClearConsole(selectedRole)
+                                promptInput = ""
+                            },
+                            modifier = Modifier.testTag("agent_clear_console_" + selectedRole.id)
+                        ) {
+                            Text("Limpar")
+                        }
                         Button(
                             onClick = {
                                 if (consoleState.isGenerating) onStopPrompt(selectedRole)
                                 else onRunPrompt(selectedRole, promptInput)
                             },
-                            enabled = currentConfig.enabled && (consoleState.isGenerating || promptInput.isNotBlank()),
+                            enabled = if (consoleState.isGenerating) true else currentConfig.enabled && promptInput.isNotBlank(),
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("agent_run_button_${selectedRole.id}"),
@@ -543,6 +569,24 @@ fun AgentsScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(if (consoleState.isGenerating) "Interromper" else "Executar Localmente")
                         }
+                    }
+
+                    if (consoleState.lastPrompt.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Mensagem enviada ao Console: " + consoleState.lastPrompt,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (!consoleState.status.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = consoleState.status,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (consoleState.isGenerating) accent else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
 
                     if (!consoleState.error.isNullOrBlank()) {
@@ -582,8 +626,15 @@ fun AgentsScreen(
                             text = consoleState.output,
                             fontFamily = MonoFontFamily,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = if (outputExpanded) Int.MAX_VALUE else 8,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (consoleState.output.length > 500) {
+                            TextButton(onClick = { outputExpanded = !outputExpanded }) {
+                                Text(if (outputExpanded) "Recolher resposta" else "Ver resposta completa")
+                            }
+                        }
                     }
                 }
             }
@@ -606,6 +657,7 @@ fun AgentsScreen(
                 }
             } else {
                 items(roleHistory.take(15), key = { it.id }) { item ->
+                    var historyExpanded by remember(item.id) { mutableStateOf(false) }
                     ObsidianCard {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -631,8 +683,15 @@ fun AgentsScreen(
                         Text(
                             text = item.responsePreview,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (historyExpanded) Int.MAX_VALUE else 6,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (item.responsePreview.length > 400) {
+                            TextButton(onClick = { historyExpanded = !historyExpanded }) {
+                                Text(if (historyExpanded) "Recolher resposta" else "Abrir resposta completa")
+                            }
+                        }
                     }
                 }
             }

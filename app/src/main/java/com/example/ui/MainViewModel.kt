@@ -35,8 +35,12 @@ import com.example.monitoring.data.LocalModelEntity
 import com.example.monitoring.data.MultiAgentRunEntity
 import com.example.security.KeyPermission
 import com.example.settings.AppSettings
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,6 +49,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -53,14 +58,18 @@ data class AgentConsoleState(
     val isGenerating: Boolean = false,
     val output: String = "",
     val error: String? = null,
+    val status: String? = null,
+    val lastPrompt: String = "",
     val selectedImageUri: Uri? = null,
-    val selectedImageTempPath: String? = null
+    val selectedImageTempPath: String? = null,
+    val conversation: List<ChatTurn> = emptyList()
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val container = (application as LocalDevAiApplication).container
     private val saceProgressStore = SaceProgressStore(application)
+    private val saceBenchmarkStore = SaceBenchmarkStore(application)
 
     private val diagnosticsRunner = SystemDiagnosticsRunner(
         deviceProfiler = container.deviceProfiler,
@@ -136,12 +145,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiBannerMessage: StateFlow<String?> = _uiBannerMessage.asStateFlow()
 
     private val consoleJobs = mutableMapOf<AgentRole, Job>()
+    private var multiAgentUiJob: Job? = null
 
     init {
         viewModelScope.launch {
             val primary = container.apiKeyManager.ensurePermanentPrimaryKey()
             _primaryKeyPlaintext.value = container.apiKeyManager.decryptKeyForDisplay(primary)
             val initialSettings = container.settingsRepository.settingsFlow.first()
+            container.memoryBudgetManager.updateUserRamLimitMb(initialSettings.ramLimitMb)
+            container.memoryBudgetManager.updateSystemRamReserveMb(initialSettings.systemRamReserveMb)
             if (initialSettings.autoStartServerOnLaunch && !serverStatus.value.isRunning) {
                 LocalApiForegroundService.startServerService(getApplication(), initialSettings.serverPort)
                 container.networkDiscovery.refreshNow()
@@ -386,85 +398,203 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun runAgentConsolePrompt(role: AgentRole, prompt: String) {
-        if (prompt.isBlank()) return
+        val normalizedPrompt = prompt.trim()
+        if (normalizedPrompt.isBlank()) {
+            updateConsole(role) { it.copy(error = "Digite uma mensagem antes de executar.", status = null) }
+            return
+        }
+
         consoleJobs.remove(role)?.cancel()
-        val job = viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val thisJob = currentCoroutineContext()[Job]
             val currentConsole = _agentConsoles.value[role] ?: AgentConsoleState()
-            updateConsole(role) { it.copy(isGenerating = true, output = "", error = null) }
-            InferenceTaskForegroundService.startTask(getApplication())
+            val streamedOutput = StringBuilder()
+            var receivedCompletion = false
+            var failureMessage: String? = null
+            var taskStarted = false
+
+            updateConsole(role) {
+                it.copy(
+                    isGenerating = true,
+                    output = "",
+                    error = null,
+                    status = "Mensagem preparada. Iniciando inferência local...",
+                    lastPrompt = normalizedPrompt
+                )
+            }
 
             try {
-                val turns = listOf(
-                    ChatTurn(
-                        role = "user",
-                        text = prompt.trim(),
-                        imagePath = if (role == AgentRole.VISION) currentConsole.selectedImageTempPath else null
-                    )
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
+                val userTurn = ChatTurn(
+                    role = "user",
+                    text = normalizedPrompt,
+                    imagePath = if (role == AgentRole.VISION) currentConsole.selectedImageTempPath else null
                 )
+                // Retain at most 10 exchanges (20 turns) to avoid unbounded memory growth.
+                val turns = currentConsole.conversation.takeLast(20) + userTurn
                 val stream = when (role) {
                     AgentRole.CODING -> container.codingAgent.streamExecute(turns, "UI")
                     AgentRole.VISION -> container.visionAgent.streamExecute(turns, "UI")
                     AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "UI")
                 }
-                stream.collect { ev ->
-                    when (ev) {
+
+                stream.collect { event ->
+                    when (event) {
+                        is InferenceStreamEvent.Status -> {
+                            updateConsole(role) { it.copy(status = event.message) }
+                        }
                         is InferenceStreamEvent.Token -> {
-                            updateConsole(role) { it.copy(output = it.output + ev.text) }
+                            if (event.text.isNotEmpty()) {
+                                streamedOutput.append(event.text)
+                                updateConsole(role) {
+                                    it.copy(output = streamedOutput.toString(), error = null)
+                                }
+                            }
                         }
                         is InferenceStreamEvent.Completed -> {
-                            updateConsole(role) {
-                                it.copy(isGenerating = false, output = ev.fullText.ifBlank { it.output })
+                            receivedCompletion = true
+                            val finalText = event.fullText.takeIf { it.isNotBlank() }
+                                ?: streamedOutput.toString()
+                            if (finalText.isBlank()) {
+                                failureMessage = "A inferência terminou, mas o modelo não gerou texto. Verifique o modelo associado, o backend e os parâmetros de saída."
+                            } else {
+                                streamedOutput.clear()
+                                streamedOutput.append(finalText)
+                                updateConsole(role) {
+                                    it.copy(
+                                        output = finalText,
+                                        error = null,
+                                        status = "Resposta recebida do modelo local.",
+                                        conversation = (currentConsole.conversation + userTurn + ChatTurn(role = "assistant", text = finalText)).takeLast(20)
+                                    )
+                                }
                             }
                         }
                         is InferenceStreamEvent.Failed -> {
-                            updateConsole(role) { it.copy(isGenerating = false, error = ev.errorMessage) }
+                            failureMessage = event.errorMessage
+                            updateConsole(role) {
+                                it.copy(error = event.errorMessage, status = "A inferência foi encerrada com erro.")
+                            }
                         }
                         else -> Unit
                     }
                 }
+
+                when {
+                    failureMessage != null -> updateConsole(role) {
+                        it.copy(error = failureMessage, status = "Não foi possível concluir a resposta.")
+                    }
+                    !receivedCompletion -> updateConsole(role) {
+                        it.copy(
+                            error = "O fluxo de inferência foi encerrado sem evento de conclusão. A mensagem foi enviada pelo console, mas não houve confirmação de resposta do runtime.",
+                            status = "Resposta não confirmada."
+                        )
+                    }
+                    streamedOutput.isBlank() -> updateConsole(role) {
+                        it.copy(
+                            error = "O modelo concluiu sem conteúdo. Isso não será tratado como uma resposta válida.",
+                            status = "Resposta vazia detectada."
+                        )
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.java.simpleName
+                updateConsole(role) {
+                    it.copy(error = "Falha no Console Direto: $detail", status = "Erro durante a inferência.")
+                }
             } finally {
-                updateConsole(role) { it.copy(isGenerating = false) }
-                InferenceTaskForegroundService.finishTask(getApplication())
+                if (consoleJobs[role] === thisJob) {
+                    updateConsole(role) { it.copy(isGenerating = false) }
+                }
+                if (taskStarted) {
+                    InferenceTaskForegroundService.finishTask(getApplication())
+                }
             }
         }
         consoleJobs[role] = job
+        job.start()
     }
 
     fun stopAgentConsole(role: AgentRole) {
         consoleJobs.remove(role)?.cancel()
-        updateConsole(role) { it.copy(isGenerating = false) }
+        updateConsole(role) {
+            it.copy(isGenerating = false, status = "Execução interrompida pelo usuário.")
+        }
+    }
+
+    fun clearAgentConsole(role: AgentRole) {
+        consoleJobs.remove(role)?.cancel()
+        updateConsole(role) {
+            it.copy(
+                isGenerating = false,
+                output = "",
+                error = null,
+                status = "Conversa limpa.",
+                lastPrompt = "",
+                conversation = emptyList(),
+                selectedImageUri = null,
+                selectedImageTempPath = null
+            )
+        }
     }
 
 
     // --- AI Calibration Lab ---
+    private val calibrationPreferences = application.getSharedPreferences("sace_progress", 0)
+    private val _selectedCalibrationRoles = MutableStateFlow(
+        calibrationPreferences.getStringSet("selected_agent_roles_v1", null)
+            ?.mapNotNull { id -> AgentRole.entries.firstOrNull { it.id == id } }
+            ?.toSet()
+            ?.takeIf { it.isNotEmpty() }
+            ?: AgentRole.entries.toSet()
+    )
+    val selectedCalibrationRoles: StateFlow<Set<AgentRole>> = _selectedCalibrationRoles.asStateFlow()
+
+    fun setCalibrationAgentSelected(role: AgentRole, selected: Boolean) {
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning ||
+            _calibrationState.value.canResume) return
+        val updated = _selectedCalibrationRoles.value.toMutableSet().apply {
+            if (selected) add(role) else remove(role)
+        }
+        _selectedCalibrationRoles.value = updated
+        calibrationPreferences.edit()
+            .putStringSet("selected_agent_roles_v1", updated.map { it.id }.toSet())
+            .apply()
+    }
+
     private val _calibrationDurations = MutableStateFlow(
         mapOf(AgentRole.CODING to 60, AgentRole.REASONING to 45, AgentRole.VISION to 20)
     )
     private val _calibrationModes = MutableStateFlow(
-        mapOf(
-            AgentRole.CODING to CalibrationMode.NORMAL,
-            AgentRole.REASONING to CalibrationMode.NORMAL,
-            AgentRole.VISION to CalibrationMode.NORMAL
-        )
+        AgentRole.entries.associateWith { role ->
+            val savedMode = calibrationPreferences.getString("calibration_mode_${role.id}", null)
+            runCatching { CalibrationMode.valueOf(savedMode ?: CalibrationMode.NORMAL.name) }
+                .getOrDefault(CalibrationMode.NORMAL)
+        }
     )
     val calibrationModes: StateFlow<Map<AgentRole, CalibrationMode>> = _calibrationModes.asStateFlow()
 
     fun setCalibrationMode(role: AgentRole, mode: CalibrationMode) {
-        if (_calibrationState.value.isRunning) return
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
         _calibrationModes.value = _calibrationModes.value.toMutableMap().apply { put(role, mode) }
+        calibrationPreferences.edit().putString("calibration_mode_${role.id}", mode.name).apply()
     }
     val calibrationDurations: StateFlow<Map<AgentRole, Int>> = _calibrationDurations.asStateFlow()
 
     fun setCalibrationDuration(role: AgentRole, minutes: Int) {
-        if (_calibrationState.value.isRunning) return
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
         _calibrationDurations.value = _calibrationDurations.value.toMutableMap().apply {
-            put(role, minutes.coerceIn(1, 120))
+            put(role, minutes.coerceIn(10, 120))
         }
     }
 
     private val _calibrationState = MutableStateFlow(CalibrationUiState())
     val calibrationState: StateFlow<CalibrationUiState> = _calibrationState.asStateFlow()
     private var calibrationJob: Job? = null
+    private var benchmarkJob: Job? = null
     private var pauseRequested = false
 
     init {
@@ -480,21 +610,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val startedWaiting = System.currentTimeMillis()
         while (true) {
             val profile = container.deviceProfiler.captureProfile()
+            val settings = container.settingsRepository.settingsFlow.first()
             val thermal = profile.thermalStatusLabel
-            val severeThermal = container.deviceProfiler.isThermalSevereOrCritical()
-            val lowMemory = container.deviceProfiler.isSystemLowMemory() || profile.availableRamMb < 650L
+            // The app-level thermal guard is optional; Android firmware thermal protection remains active.
+            val severeThermal = settings.thermalGuardEnabled && container.deviceProfiler.isThermalSevereOrCritical()
+            val lowMemory = container.deviceProfiler.isSystemLowMemory() ||
+                profile.availableRamMb < settings.systemRamReserveMb + 64L
             if (!severeThermal && !lowMemory) {
                 _calibrationState.value = _calibrationState.value.copy(thermalMessage = null)
-                if (thermal.contains("leve", ignoreCase = true) || thermal.contains("Moderado", ignoreCase = true)) delay(4_000L)
+                if (settings.thermalGuardEnabled && (thermal.contains("leve", ignoreCase = true) || thermal.contains("Moderado", ignoreCase = true))) delay(4_000L)
                 return
             }
             val reason = buildList {
                 if (severeThermal) add("temperatura elevada ($thermal)")
-                if (lowMemory) add("pouca RAM livre (${profile.availableRamMb} MB)")
+                if (lowMemory) add("RAM livre abaixo da reserva configurada (${settings.systemRamReserveMb} MB)")
             }.joinToString(" e ")
-            _calibrationState.value = _calibrationState.value.copy(thermalMessage = "Treinamento em espera por segurança: $reason.")
+            _calibrationState.value = _calibrationState.value.copy(thermalMessage = "Treinamento em espera: $reason.")
             if (System.currentTimeMillis() - startedWaiting >= 180_000L) {
-                throw IllegalStateException("SACE pausado automaticamente: $reason. Aguarde o aparelho esfriar/liberar memória e retome.")
+                throw IllegalStateException("SACE pausado automaticamente: $reason. Libere memória ou aguarde o aparelho estabilizar e retome.")
             }
             delay(15_000L)
         }
@@ -523,123 +656,248 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startCalibration(resume: Boolean = false) {
-        if (_calibrationState.value.isRunning) return
-        calibrationJob?.cancel()
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
+        if (calibrationJob?.isCompleted == false || benchmarkJob?.isCompleted == false) return
         pauseRequested = false
         calibrationJob = viewModelScope.launch {
             val savedCheckpoint = if (resume) saceProgressStore.readCheckpoint() else null
-            val roles = listOf(AgentRole.CODING, AgentRole.REASONING, AgentRole.VISION)
+            val roles = _selectedCalibrationRoles.value.sortedBy { it.ordinal }
+            if (roles.isEmpty()) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false,
+                    error = "Selecione pelo menos uma IA para iniciar a calibração."
+                )
+                return@launch
+            }
+
+            // Validate every selected agent before beginning the timed session.
+            // This prevents a session from appearing to start and failing only when it
+            // reaches an agent with no usable model or an incompatible Vision model.
+            val unavailableAgents = roles.mapNotNull { role ->
+                val config = container.database.agentConfigDao().getByRole(role.id)
+                    ?: AgentConfigEntity(roleId = role.id)
+                when {
+                    !config.enabled -> "${role.displayName} está desativada."
+                    config.assignedModelId.isNullOrBlank() -> "${role.displayName} não tem modelo associado."
+                    else -> {
+                        val model = container.database.localModelDao().getById(config.assignedModelId!!)
+                        when {
+                            model == null -> "${role.displayName}: o modelo associado não existe mais no catálogo."
+                            role == AgentRole.VISION && !model.supportsVision ->
+                                "Vision AI precisa de um modelo multimodal com suporte real a imagens."
+                            role == AgentRole.VISION && model.format.equals("GGUF", ignoreCase = true) &&
+                                (model.mmprojPath.isNullOrBlank() || !File(model.mmprojPath).isFile) ->
+                                "O modelo GGUF da Vision AI está sem um arquivo mmproj válido."
+                            else -> null
+                        }
+                    }
+                }
+            }
+            if (unavailableAgents.isNotEmpty()) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false,
+                    error = "Calibração não iniciada. Corrija antes: " + unavailableAgents.joinToString(" ")
+                )
+                return@launch
+            }
+
             val cases = mapOf(
                 AgentRole.CODING to listOf(
-                    "Firmware ESP32: planeje um firmware C++ para ler um sensor, controlar uma saída e tratar falha de leitura. Inclua estados e critérios de teste.",
-                    "Menu funcional: crie a estrutura de um menu para OLED com opções, navegação por encoder e retorno. Explique como evitar bloqueios no loop principal.",
-                    "Configurações persistentes: implemente em Kotlin uma tela de opções que salva preferências, valida valores e restaura padrões.",
-                    "Depuração Kotlin: fun dividir(a: Int, b: Int): Int { return a / b }; println(dividir(10, 0)). Identifique e corrija a falha.",
-                    "Depuração Python: items = [1, 2, 3]; for i in range(len(items) + 1): print(items[i]). Corrija o limite e proponha um teste.",
-                    "API: projete uma rota HTTP que recebe configuração, valida os campos, responde com erros claros e não salva dados inválidos.",
-                    "Projeto modular: separe um aplicativo em interface, regras de negócio, armazenamento e acesso à rede. Mostre arquivos e responsabilidades.",
-                    "Linux: analise um serviço que falha ao iniciar. Liste comandos de leitura seguros para conferir status, logs, permissões e dependências; não alegue execução.",
-                    "Linux: receba um projeto de laboratório com scripts, unidades systemd e arquivos de configuração. Aponte falhas, proponha melhorias e escreva testes sem alterar o sistema real.",
-                    "ESP32 e sensores: crie um firmware C++ com leitura periódica, filtro simples, timeout de sensor e estado seguro quando a leitura falhar. Inclua testes.",
-                    "ESP32 e comunicação: projete uma troca de mensagens entre dois dispositivos usando um protocolo definido. Trate perda, repetição e dados inválidos.",
-                    "OLED e encoder: implemente a lógica de um menu com páginas, seleção, retorno, edição de valores e atualização sem bloquear o loop.",
-                    "Persistência: crie uma camada para salvar configurações com versão, valores padrão e recuperação quando os dados salvos estiverem inválidos.",
-                    "Kotlin Android: implemente uma tela de configurações com estado observável, validação, salvamento assíncrono e tratamento de erro.",
-                    "Java: analise uma classe com responsabilidades misturadas e proponha uma divisão em módulos sem alterar o comportamento público.",
-                    "Python: crie uma ferramenta de linha de comando que leia um arquivo, valide os dados e gere um relatório; trate arquivo ausente e conteúdo malformado.",
-                    "Build: analise um erro Gradle com dependências incompatíveis. Liste os arquivos e versões que precisa conferir antes de sugerir uma correção.",
-                    "Concorrência: revise um código que compartilha estado entre tarefas. Identifique condições de corrida e proponha sincronização adequada.",
-                    "Testes: transforme requisitos de um menu de firmware em casos de teste, incluindo limites, entradas inválidas e recuperação após reinicialização.",
-                    "Refatoração: receba um módulo grande e proponha uma divisão em arquivos, interfaces e responsabilidades, mantendo a compatibilidade.",
-                    "Revisão de segurança: analise uma API que recebe configurações e identifique validação ausente, exposição de segredos e operações perigosas."
-                ),
-                AgentRole.REASONING to listOf(
-                    "Lógica: Ana é mais velha que Bia. Bia é mais velha que Caio. Diego é mais novo que Caio. Ordene as quatro pessoas e explique a dedução.",
-                    "Diagnóstico tecnológico: um celular fecha um modelo local ao abrir outro aplicativo. Analise RAM, memória livre, contexto do modelo e descarregamento; separe fatos de hipóteses.",
-                    "Hardware: explique como CPU, RAM, armazenamento e sistema operacional trabalham juntos ao abrir um modelo local de IA.",
-                    "Redes: um computador conecta ao Wi-Fi, mas não abre sites. Compare hipóteses envolvendo IP, DNS, gateway e conexão externa.",
-                    "Sistemas: compare duas arquiteturas para um app móvel com três modelos de IA e pouca RAM. Considere execução sequencial, tempo e custo de recarga.",
-                    "Investigação: receba três relatos que se contradizem sobre uma falha. Liste o que está confirmado, o que falta medir e qual teste distingue as hipóteses.",
-                    "Planejamento: divida a criação de um firmware ESP32 com menu, configurações salvas e comunicação Wi-Fi em tarefas, dependências e critérios de aceite.",
-                    "Colaboração: revise uma resposta da Coding AI que afirma ter compilado um projeto sem mostrar logs. Identifique o que pode e o que não pode ser confirmado.",
-                    "Conhecimento tecnológico: explique a diferença entre processo, serviço, thread, memória virtual e armazenamento, usando exemplos simples.",
-                    "Análise de desempenho: um app usa muita RAM depois de alternar entre modelos. Separe possíveis causas e proponha medições que confirmem cada uma.",
-                    "Arquitetura: compare execução sequencial e paralela de três modelos em um celular com memória limitada. Explique os custos de cada opção.",
-                    "Investigação: um firmware reinicia aleatoriamente. Organize hipóteses sobre alimentação, watchdog, memória e sensores e escolha uma ordem de testes.",
-                    "Dados: analise uma tabela pequena com valores ausentes e duplicados. Explique como limpar os dados sem apagar informação válida.",
-                    "Probabilidade: estime a chance de pelo menos uma falha em várias tentativas independentes e explique as suposições usadas.",
-                    "Pensamento crítico: avalie uma afirmação técnica sem fonte. Diga quais evidências seriam suficientes para aceitá-la ou rejeitá-la.",
-                    "Planejamento: organize um projeto com prazo curto, três módulos dependentes e recursos limitados. Defina ordem, riscos e critérios de conclusão.",
-                    "Conflito entre agentes: duas IAs dão soluções incompatíveis. Compare as evidências, identifique o ponto de discordância e proponha um teste decisivo.",
-                    "Sistema operacional: explique como um processo inicia, abre arquivos, usa memória e encerra. Diferencie o que é comum e o que varia entre Android, Linux e Windows.",
-                    "Limites de conhecimento: responda a um problema técnico com dados insuficientes. Mostre o que pode concluir e faça a pergunta mínima necessária."
+                    "NEBULA OS — Arquitetura do sistema: proponha a divisão entre kernel Linux, serviços de sistema, daemon de sessão, interface gráfica e aplicativos. Defina responsabilidades e limites entre módulos.",
+                    "NEBULA OS — Central de comando: projete um painel administrativo para iniciar/parar serviços, consultar status, visualizar logs e confirmar ações críticas. Escreva a estrutura de componentes.",
+                    "NEBULA OS — GUI desktop: implemente em Kotlin/Compose uma janela com barra superior, dock, painel de configurações e navegação por teclado. Separe estado e componentes.",
+                    "NEBULA OS — Aparência: crie um sistema de temas com modo claro/escuro, transparência configurável, escala, tipografia e persistência de preferências.",
+                    "NEBULA OS — Gerenciador de arquivos: escreva em Kotlin a lógica de navegação por diretórios, seleção, operações assíncronas e tratamento de permissões/erros.",
+                    "NEBULA OS — Serviço de sistema: escreva um serviço Linux em C que leia uma configuração, valide entradas, registre eventos e encerre corretamente. Inclua tratamento de erro.",
+                    "NEBULA OS — Comunicação: crie um contrato IPC entre a GUI e um serviço de sistema. Defina mensagens, códigos de erro, timeout e validação.",
+                    "NEBULA OS — Inicialização: desenhe o fluxo de boot desde o kernel até a sessão gráfica. Implemente um verificador simples de dependências em C.",
+                    "NEBULA OS — Gerenciador de processos: implemente em C um utilitário que leia informações de processos no Linux via /proc, trate arquivos ausentes e apresente uso de recursos.",
+                    "NEBULA OS — Atualizações: projete um atualizador que verifica versão, integridade, espaço disponível e possibilidade de rollback antes de aplicar mudanças.",
+                    "NEBULA OS — Configurações: implemente armazenamento versionado de preferências, migração de configuração antiga e recuperação de valores inválidos.",
+                    "NEBULA OS — Terminal: construa a arquitetura de um terminal integrado à GUI, com execução isolada de comandos permitidos, histórico e tratamento de saída.",
+                    "NEBULA OS — Segurança: revise permissões de serviços, separação de privilégios e validação de entradas. Proponha testes sem executar ações destrutivas.",
+                    "NEBULA OS — Desempenho: analise uma GUI lenta em hardware limitado. Separe custo de renderização, I/O, processos em segundo plano e consumo de RAM.",
+                    "NEBULA OS — Testes: escreva testes unitários para um módulo de configurações e testes de integração para GUI ↔ serviço, incluindo falhas e timeout.",
+                    "NEBULA OS — Integração realista: receba requisitos para uma central de comando e entregue árvore de arquivos, interfaces Kotlin, serviço C e critérios de aceitação.",
+                    "GITHUB — Identifique se uma URL pertence realmente a github.com ou é um domínio parecido. Explique por que domínio reconhecido não garante que o arquivo ou repositório seja seguro.",
+                    "GITHUB — Prepare um git clone de um repositório público oficial para uma pasta nova no macOS, sem executar scripts nem sobrescrever arquivos existentes. Informe diretório, comando e resultado esperado.",
+                    "GITHUB — Prepare o download de um asset de release usando GitHub CLI, indicando owner/repo, tag, nome do arquivo e pasta de destino. Não use download seguido de execução.",
+                    "GITHUB — Após baixar um arquivo, proponha verificação SHA-256 e, quando disponível, verificação de release, asset ou atestação. Explique o que cada verificação comprova e o que não comprova.",
+                    "GITHUB — Analise um projeto com README, scripts de instalação e dependências. Liste o que precisa ser inspecionado antes de executar qualquer arquivo baixado.",
+                    "TERMINAL — Diferencie comando sugerido, comando realmente executado e resultado confirmado. Se não houver retorno do terminal do computador, não declare o download concluído.",
+                    "FUNDAMENTOS — Explique a diferença entre compilador, interpretador, linker e runtime. Depois escolha o fluxo adequado para compilar um pequeno programa C e um aplicativo Kotlin, indicando quais artefatos são gerados.",
+                    "LINGUAGEM C — Analise um trecho com ponteiros, arrays e alocação dinâmica. Explique propriedade da memória, limites do array, inicialização e como evitar vazamentos e acesso após liberação. Crie testes para entradas vazias e limites.",
+                    "KOTLIN — Compare val, var, data class, sealed class, null safety e generics. Modele estados de uma tela de carregamento, sucesso, vazio e erro sem representar estados impossíveis.",
+                    "CORROTINAS — Projete uma tarefa de download em Kotlin usando coroutines. Trate cancelamento, timeout, exceção e atualização da interface sem bloquear a thread principal.",
+                    "JETPACK COMPOSE — Crie uma tela de configurações com estado hoisted, componentes reutilizáveis e validação. Explique recomposição, remember, rememberSaveable e o que deve sobreviver à recriação da Activity.",
+                    "ANDROID — Um app perde o estado ao girar a tela ou ser recriado pelo sistema. Diferencie estado de UI, ViewModel, SavedStateHandle e persistência em banco; proponha testes de recuperação.",
+                    "ANDROID — Projete um fluxo de carregamento de modelo local com progresso, cancelamento, erro de espaço insuficiente e retomada. A interface não pode congelar e deve impedir dois downloads simultâneos.",
+                    "LINUX — Compare Buildroot, Yocto, Debian Live e Linux From Scratch. Para cada um, explique objetivo, nível de controle, esforço de manutenção e cenário adequado; escolha uma base para um computador de poucos recursos.",
+                    "LINUX — Descreva o caminho de inicialização UEFI → bootloader → kernel → initramfs → processo init → serviços → sessão gráfica. Explique o papel de cada etapa e como investigar uma falha sem presumir a causa.",
+                    "LINUX — Projete um serviço systemd com usuário sem privilégios, diretórios necessários, política de reinício, logs e dependências. Explique quais opções reduzem o impacto de uma falha.",
+                    "LINUX — Um aplicativo não consegue abrir um arquivo. Diferencie caminho incorreto, permissões, proprietário, montagem somente leitura e falta de espaço. Monte uma sequência de verificações de leitura.",
+                    "REDES — Explique DNS, DHCP, endereço IP, gateway, TCP e UDP. Diagnostique um computador que conecta ao Wi-Fi mas não abre sites, separando falha local, DNS e acesso externo.",
+                    "ESP32 — Projete leitura de botão sem bloqueio usando debounce e máquina de estados. Inclua estados, transições, temporização e testes para pressionamento rápido e ruído.",
+                    "ESP32 — Compare I2C, SPI, UART e GPIO. Escolha a interface para OLED, TFT, sensor serial e comunicação entre duas placas, justificando fios, velocidade, endereçamento e limitações.",
+                    "ESP32 — Um sensor retorna leituras inválidas de forma intermitente. Projete validação, timeout, número limitado de tentativas, estado de falha e recuperação sem travar o loop principal.",
+                    "ESP32 — Faça um orçamento de memória para firmware com Wi-Fi, tela, sensores e buffers. Identifique alocações persistentes, fragmentação, pilha e formas de medir antes de otimizar.",
+                    "BANCO DE DADOS — Modele tabelas para modelos locais, agentes e histórico de conversas. Defina chaves, índices, relações, migração de versão e comportamento quando um modelo é removido.",
+                    "APIs — Projete uma API REST para listar modelos e iniciar uma inferência. Defina métodos, payloads, validação, códigos HTTP, timeout, cancelamento e erros que o cliente deve exibir.",
+                    "GIT — Explique branch, commit, merge, rebase e pull request. Resolva conceitualmente um conflito em que duas alterações modificaram a mesma função, preservando ambas as intenções.",
+                    "TESTES — Crie uma estratégia que combine testes unitários, integração, interface e regressão para um app Android. Para cada teste, defina entrada, comportamento esperado e o defeito que ele detecta.",
+                    "DEPURAÇÃO — Receba um stack trace com erro de null pointer. Mostre como localizar a primeira linha do código do projeto, verificar o estado e reproduzir o problema antes de propor a correção.",
+                    "DESEMPENHO — Uma lista com centenas de itens fica lenta. Investigue recomposição, consultas repetidas, imagens, I/O e operações na thread principal. Priorize medições e correções de baixo risco.",
+                    "SEGURANÇA — Faça um threat model simples para um gerenciador de arquivos local. Identifique dados importantes, entradas não confiáveis, permissões, riscos e defesas proporcionais.",
+                    "CI/CD — Desenhe um pipeline GitHub Actions para compilar, executar testes e publicar um APK de debug como artefato. Separe sucesso de build de validação em dispositivo real.",
+                    "ARQUITETURA — Compare monólito modular e microsserviços para um aplicativo pequeno que roda localmente. Considere RAM, latência, manutenção, implantação e falhas; escolha sem adotar complexidade desnecessária."
                 ),
                 AgentRole.VISION to listOf(
-                    "MAPA DE INTERFACE: identifique no máximo cinco componentes importantes, diga em que região estão e explique como se agrupam. Não descreva o fundo inteiro.",
-                    "LEITURA DE TEXTO: transcreva somente os rótulos realmente legíveis. Marque texto incerto como [ilegível]; não complete palavras por contexto.",
-                    "GEOMETRIA: compare alinhamento, largura relativa, espaçamento e posição de cartões e painéis. Use relações como maior/menor e esquerda/direita, sem inventar pixels.",
-                    "ESTADO VISUAL: localize controles selecionados, desativados, alertas e indicadores de carregamento. Para cada estado, cite a evidência visual.",
-                    "AUDITORIA DE UI: encontre até três inconsistências de cor, tipografia, borda, alinhamento ou espaçamento. Se não houver evidência, diga que não encontrou.",
-                    "ESPECIFICAÇÃO PARA CODING AI: transforme a tela em uma lista curta de componentes, posição relativa, estilo aproximado e comportamento que a imagem comprova.",
-                    "CONTAGEM E LOCALIZAÇÃO: conte apenas os cartões, botões ou painéis que conseguir distinguir. Informe quando algum elemento estiver parcialmente oculto.",
-                    "COMPARAÇÃO: compare duas áreas da imagem e indique uma semelhança e uma diferença concreta, sem repetir a descrição geral.",
-                    "DIAGNÓSTICO VISUAL: aponte o problema visual mais importante, a evidência e uma correção específica. Não suponha falhas de funcionamento.",
-                    "RESUMO COM EVIDÊNCIAS: responda à pergunta principal em até cinco tópicos; cada tópico deve conter uma observação visível, não uma suposição.",
-                    "FORMULÁRIO: identifique campos, rótulos, botões e agrupamentos. Informe a ordem de leitura e não suponha validações que não aparecem.",
-                    "TELA DE CONFIGURAÇÕES: agrupe opções por finalidade e destaque controles que parecem selecionados ou desativados.",
-                    "DASHBOARD: compare a hierarquia visual entre título, indicadores, gráficos e cartões. Cite somente elementos visíveis.",
-                    "ERRO VISUAL: procure sobreposição, corte, desalinhamento ou contraste insuficiente. Para cada achado, indique a região e a evidência.",
-                    "DIAGRAMA: identifique caixas, setas e relações visíveis. Se uma ligação estiver ambígua, marque como incerta.",
-                    "FOTO DE COMPONENTES: descreva somente componentes que conseguir distinguir e diferencie identificação provável de identificação confirmada.",
-                    "OCR: leia os textos mais importantes da imagem e preserve a escrita original. Não complete partes ilegíveis.",
-                    "COMPARAÇÃO DE TELAS: compare duas interfaces fornecidas, apontando mudanças concretas de posição, tamanho e estado.",
-                    "ACESSIBILIDADE VISUAL: avalie contraste aparente, tamanho relativo dos textos e clareza dos controles sem inferir recursos invisíveis.",
-                    "ESPECIFICAÇÃO: transforme a imagem em uma lista curta de componentes e relações que a Coding AI possa implementar."
+                    "NEBULA OS — Reconhecimento de desktop: analise a captura e identifique barra superior, dock, menu de aplicativos, janelas, painel e área de trabalho. Separe observação de hipótese.",
+                    "NEBULA OS — Direção visual: avalie se a interface se aproxima visualmente de Linux desktop, macOS ou Windows. Justifique por elementos visíveis, sem afirmar que é um desses sistemas.",
+                    "NEBULA OS — Design de central de comando: avalie hierarquia de status, serviços, logs, alertas e controles. Proponha uma organização visual mais clara.",
+                    "NEBULA OS — GUI de configurações: examine agrupamento de categorias, navegação, controles, estados selecionados e consistência entre telas.",
+                    "NEBULA OS — Linguagem visual: compare transparência, sombras, bordas, cantos, tipografia, ícones e espaçamento. Diferencie o que está visível do que é inferido.",
+                    "NEBULA OS — Gerenciador de arquivos: avalie árvore lateral, breadcrumbs, lista/grade de arquivos, ações e estados vazios. Proponha melhorias específicas.",
+                    "NEBULA OS — Gerenciador de janelas: analise barra de título, botões de janela, foco, sobreposição e organização de múltiplas janelas.",
+                    "NEBULA OS — Tela de boot e login: avalie legibilidade, identidade visual, hierarquia e clareza dos estados de inicialização.",
+                    "NEBULA OS — Dashboard: avalie gráficos de CPU, RAM, armazenamento e rede. Verifique se unidades, rótulos e estados são compreensíveis.",
+                    "NEBULA OS — Acessibilidade: procure baixo contraste, textos pequenos, controles difíceis de distinguir e dependência exclusiva de cor.",
+                    "NEBULA OS — Comparação de versões: compare duas capturas e liste somente alterações visuais comprováveis de layout, tamanho, cor e estado.",
+                    "NEBULA OS — Especificação para Coding AI: transforme a captura em uma descrição implementável com componentes, relações espaciais, estilo e comportamento visível.",
+                    "NEBULA OS — Consistência: compare menu, dock e painel de configurações e identifique divergências na linguagem visual.",
+                    "NEBULA OS — Diagnóstico visual: encontre sobreposição, corte, desalinhamento ou excesso de elementos e indique região e evidência.",
+                    "NEBULA OS — Protótipo: descreva como reconstruir a tela em componentes reutilizáveis, incluindo estados normal, selecionado, desativado e carregando.",
+                    "NEBULA OS — Revisão final: produza uma auditoria visual da interface como produto de sistema operacional, priorizando os três problemas mais importantes.",
+                    "LAYOUT — Analise a hierarquia entre título, conteúdo principal e ações. Identifique o elemento que recebe mais atenção e explique se essa prioridade combina com a função da tela.",
+                    "GRID — Observe alinhamentos e margens de uma interface. Identifique uma linha de alinhamento compartilhada por componentes e aponte espaçamentos inconsistentes sem inventar medidas exatas.",
+                    "TIPOGRAFIA — Compare títulos, subtítulos, rótulos e texto auxiliar. Avalie hierarquia, legibilidade, peso e comprimento das linhas; proponha ajustes sem afirmar uma fonte que não pode ser identificada.",
+                    "CORES — Examine fundo, superfícies, texto, ações e alertas. Verifique contraste aparente e consistência entre estados; não invente códigos hexadecimais a partir da imagem.",
+                    "TEMA ESCURO — Avalie uma tela escura quanto a níveis de superfície, contraste, separação de cartões e legibilidade. Diferencie preto absoluto de tons escuros apenas quando a imagem permitir.",
+                    "TRANSPARÊNCIA — Analise painéis translúcidos, desfoque e sombras. Explique o que é visualmente perceptível e o que não pode ser confirmado sobre a implementação real do efeito.",
+                    "ÍCONES — Verifique consistência de traço, preenchimento, tamanho aparente e significado. Identifique ícones ambíguos e sugira alternativas mais claras sem inventar uma biblioteca específica.",
+                    "JANELAS — Examine barra de título, botões de minimizar/maximizar/fechar, foco e sobreposição. Compare convenções visuais de Windows, macOS e desktops Linux sem identificar o sistema com certeza indevida.",
+                    "DOCK E PAINEL — Analise posição, agrupamento, indicadores de aplicativos abertos, relógio e área de status. Sugira como reduzir poluição visual sem esconder funções importantes.",
+                    "MENU — Avalie organização de categorias, busca, itens recentes e estados selecionados. Aponte se a navegação parece previsível e quais rótulos estão pouco claros.",
+                    "RESPONSIVIDADE — Examine a captura como se fosse uma tela estreita. Procure colunas comprimidas, botões cortados, texto espremido e elementos que precisariam rolar ou reorganizar.",
+                    "TECLADO — Analise uma captura com teclado virtual aberto. Identifique campos encobertos, ações escondidas e espaço útil; proponha uso de rolagem, ajuste de janela e reposicionamento do foco.",
+                    "ESTADOS DE UI — Identifique estados carregando, vazio, erro, selecionado, desativado e concluído quando estiverem visíveis. Diga quais estados importantes parecem ausentes, sem afirmar que não existem fora da captura.",
+                    "FORMULÁRIOS — Revise campos, rótulos, dicas, validação e botões. Verifique se o usuário consegue entender o que deve preencher e como corrigir um erro.",
+                    "ACESSIBILIDADE — Procure texto pequeno, contraste fraco, controles sem rótulo aparente e informação transmitida só por cor. Separe problemas comprováveis de suspeitas.",
+                    "GRÁFICOS — Analise título, legenda, eixos, unidades, escalas e rótulos. Identifique risco de interpretação errada, como eixo truncado ou ausência de unidade.",
+                    "LISTAS — Avalie densidade, separadores, alinhamento, hierarquia de nomes e metadados. Proponha uma organização que facilite localizar itens sem aumentar ruído visual.",
+                    "NAVEGAÇÃO — Examine abas, barra lateral, breadcrumbs e botão voltar. Reconstrua o caminho provável entre telas e indique ambiguidades de navegação.",
+                    "COMPARAÇÃO — Compare duas capturas da mesma tela. Liste mudanças verificáveis de posição, dimensão aparente, cor, texto e estado; não atribua causa sem evidência.",
+                    "DESIGN TOKENS — Extraia um conjunto aproximado de tokens visuais: espaçamento, raio de borda, elevação, tipografia e cores por função. Marque todos os valores como estimativas visuais.",
+                    "CONSISTÊNCIA — Compare cartões, botões e campos em diferentes regiões da imagem. Identifique variações não justificadas de altura, raio, espaçamento e estilo.",
+                    "TELA DE LOGIN — Avalie identidade, campo de senha, visibilidade, mensagens de erro e ação principal. Aponte melhorias de clareza e confiança sem presumir comportamento não visível.",
+                    "GERENCIADOR DE ARQUIVOS — Analise navegação lateral, caminho atual, lista/grade, seleção, ordenação e ações. Verifique se os elementos têm hierarquia e alinhamento coerentes.",
+                    "CONFIGURAÇÕES — Avalie agrupamento por categorias, descrições auxiliares, interruptores, seletores e salvamento aparente. Identifique opções difíceis de compreender.",
+                    "VISUAL QA — Produza um relatório com severidade alta, média e baixa para defeitos visuais comprováveis. Para cada item, informe região, evidência, impacto e correção sugerida."
+                ),
+                AgentRole.REASONING to listOf(
+                    "NEBULA OS — Pensamento em fases: decomponha a criação de um sistema operacional em requisitos, arquitetura, protótipo, implementação, integração e validação. Mostre dependências.",
+                    "NEBULA OS — Fundamentos: explique em linguagem simples a diferença entre kernel, processo, thread, serviço, driver, shell e ambiente desktop.",
+                    "NEBULA OS — Código básico: analise um programa C que lê um arquivo de configuração. Identifique riscos de ponteiro, validação, memória e retorno de erro.",
+                    "NEBULA OS — Fluxo de inicialização: raciocine sobre a sequência firmware, bootloader, kernel, init, serviços e sessão gráfica. Aponte o que varia entre distribuições.",
+                    "NEBULA OS — Diagnóstico: a central de comando mostra um serviço como ativo, mas a GUI não recebe dados. Liste hipóteses e escolha testes que diferenciem as causas.",
+                    "NEBULA OS — Arquitetura: compare implementar a GUI separada dos serviços versus concentrar tudo em um processo. Considere isolamento, manutenção e falhas.",
+                    "NEBULA OS — Memória: explique RAM, memória virtual, swap, cache e OOM. Analise como um desktop deve reagir sob pouca memória.",
+                    "NEBULA OS — Sistemas de arquivos: compare diretórios, permissões, links, montagem e espaço disponível. Resolva um cenário de erro de acesso.",
+                    "NEBULA OS — Redes: planeje como o sistema exibirá estado Wi-Fi, IP, DNS e conectividade sem confundir conexão local com acesso à internet.",
+                    "NEBULA OS — Raciocínio com evidências: receba logs incompletos de falha no boot. Separe fatos, hipóteses e informações ainda necessárias.",
+                    "NEBULA OS — Código C: explique passo a passo um programa pequeno com structs, funções, ponteiros e tratamento de erro; depois proponha testes de limite.",
+                    "NEBULA OS — Segurança: avalie por que a GUI não deve executar qualquer ação privilegiada diretamente. Proponha separação de privilégios e confirmação.",
+                    "NEBULA OS — Planejamento técnico: transforme uma ideia de dock, menu e central de comando em tarefas pequenas, ordenadas e verificáveis.",
+                    "NEBULA OS — Integração: Coding AI propõe uma API e Vision AI identifica um componente visual incompatível. Compare contratos e determine o que precisa ser ajustado.",
+                    "NEBULA OS — Pensamento crítico: uma tela parece indicar que o serviço iniciou, mas não há log. Explique por que aparência não comprova funcionamento e como verificar.",
+                    "NEBULA OS — Revisão de projeto: avalie uma proposta de OS com kernel Linux, serviços em C e GUI Kotlin. Identifique riscos, dependências, etapas e critérios de conclusão.",
+                    "SEGURANÇA DE LINKS — Compare github.com, github.com.exemplo.net e um link encurtado. Identifique o hostname real e classifique o nível de confiança sem declarar o conteúdo seguro.",
+                    "GITHUB — Avalie se um repositório público é uma fonte adequada para uma dependência. Considere proprietário, documentação, histórico, releases, tags e sinais de manutenção.",
+                    "GITHUB — Diferencie checksum SHA-256, assinatura digital e atestação de proveniência. Explique por que um hash publicado no mesmo local do arquivo não prova sozinho a identidade do autor.",
+                    "DOWNLOAD — Planeje um fluxo seguro para obter um asset de release: validar URL, confirmar projeto e versão, baixar sem executar, verificar integridade/proveniência e inspecionar o conteúdo.",
+                    "WIKIPÉDIA — Use a Wikipédia como ponto de partida para conhecimento geral, mas procure referências primárias para decisões técnicas, segurança, compatibilidade e versões.",
+                    "TERMINAL REMOTO — Determine se existe uma ferramenta real conectada ao computador. Se não existir, diferencie instruções de terminal de execução comprovada e não invente caminho, hash ou saída.",
+                    "CPU E GPU — Diferencie núcleos, threads, frequência, cache e paralelismo. Explique por que uma frequência maior isoladamente não garante que um computador seja mais rápido.",
+                    "MEMÓRIA — Diferencie RAM, armazenamento, cache, memória virtual e swap. Analise um celular lento com pouco espaço livre e outro com pouca RAM disponível; não confunda as causas.",
+                    "ARQUITETURA — Compare ARM e x86-64 em compatibilidade, consumo, desempenho e ecossistema. Explique por que um programa compilado para uma arquitetura pode não executar diretamente em outra.",
+                    "SISTEMAS OPERACIONAIS — Diferencie kernel, driver, serviço, processo, thread, shell e ambiente gráfico. Use um exemplo de abertura de aplicativo para mostrar como as partes cooperam.",
+                    "BOOT — Organize firmware, bootloader, kernel, initramfs, init, serviços e login em ordem. Indique quais etapas podem variar e quais evidências ajudam a localizar uma falha de inicialização.",
+                    "REDES — Um dispositivo recebe IP mas não acessa a internet. Crie uma árvore de diagnóstico que diferencie Wi-Fi, DHCP, gateway, DNS, rota e indisponibilidade do serviço remoto.",
+                    "TCP E UDP — Compare conexão, entrega, ordenação, latência e tolerância a perdas. Escolha o protocolo para transferência de arquivo, chamada em tempo real e consulta simples, justificando cada caso.",
+                    "BANCO DE DADOS — Explique tabela, chave primária, chave estrangeira, índice e transação. Analise o risco de atualizar duas tabelas e ocorrer falha entre as operações.",
+                    "ALGORITMOS — Compare busca linear e busca binária. Mostre as condições necessárias para cada uma e explique por que a busca binária não funciona corretamente em uma lista sem ordenação.",
+                    "COMPLEXIDADE — Compare O(1), O(log n), O(n), O(n log n) e O(n²) com exemplos simples. Explique por que complexidade ajuda a prever crescimento, mas não substitui medição real.",
+                    "PROBABILIDADE — Uma falha pode ter três causas com evidências diferentes. Explique como atualizar a confiança em cada hipótese quando chega uma nova medição, sem transformar estimativas em certezas.",
+                    "MÉTODO CIENTÍFICO — Um bug desaparece depois de reiniciar o app. Separe observação, hipótese, experimento e conclusão. Proponha um teste que possa refutar a hipótese principal.",
+                    "CAUSA RAIZ — Um aplicativo fecha ao carregar um modelo. Considere RAM, arquivo corrompido, incompatibilidade, permissões e erro de runtime. Escolha medições em ordem de valor informativo.",
+                    "PLANEJAMENTO — Transforme a criação de um desktop Linux personalizado em etapas com dependências. Identifique caminho crítico, entregas pequenas, riscos e critérios objetivos de conclusão.",
+                    "DECISÃO — Compare Buildroot, Yocto, Debian Live e Linux From Scratch para um sistema embarcado, uma distribuição desktop e um laboratório educacional. Não escolha a mesma ferramenta para todos os cenários.",
+                    "SEGURANÇA DIGITAL — Diferencie autenticação, autorização, criptografia, hash e assinatura digital. Dê um exemplo de uso correto e um erro comum de interpretação para cada conceito.",
+                    "CONFIANÇA EM FONTES — Avalie duas páginas que discordam sobre uma API. Compare data, versão, documentação oficial, exemplos reproduzíveis e evidências; explique como decidir sem inventar certeza.",
+                    "IA LOCAL — Compare modelo quantizado, modelo maior, contexto longo e KV cache. Explique os efeitos possíveis sobre RAM, velocidade e qualidade sem assumir números que não foram fornecidos.",
+                    "ALUCINAÇÃO — Uma IA afirma que executou um comando, mas não existe ferramenta conectada. Identifique a afirmação não comprovada e reescreva a resposta separando instrução, execução e evidência.",
+                    "COLABORAÇÃO — Coding AI propõe uma solução, Vision AI aponta um desalinhamento e Reasoning AI identifica uma contradição. Defina como verificar cada observação e resolver discordâncias sem votação cega.",
+                    "ESTIMATIVA — Um projeto tem tarefas dependentes, tarefas paralelas e incertezas. Monte uma estimativa por faixas, identifique o que pode atrasar e explique por que uma data exata seria enganosa.",
+                    "RECUPERAÇÃO — Uma atualização do sistema falha no meio do processo. Planeje backup, verificação de integridade, rollback, logs e validação após recuperação.",
+                    "CONTRATOS — Duas partes de um app discordam sobre formato JSON e códigos de erro. Proponha um contrato de API versionado e testes de contrato para evitar incompatibilidade.",
+                    "DESEMPENHO — O app está lento, mas não se sabe se o gargalo é CPU, RAM, armazenamento ou rede. Escolha medições que distingam as causas e explique por que otimizar antes de medir pode piorar o sistema.",
+                    "ARGUMENTAÇÃO — Analise uma proposta técnica com três afirmações, duas evidências e uma suposição escondida. Identifique a suposição e diga qual teste pode confirmá-la.",
+                    "ÉTICA TÉCNICA — Um recurso funciona, mas coleta dados desnecessários. Avalie minimização de dados, transparência, segurança e impacto no usuário; proponha uma alternativa simples."
                 )
             )
-            val selectedDurations = _calibrationDurations.value
-            val selectedModes = _calibrationModes.value
+            val restoredModes = savedCheckpoint?.selectedModes?.mapNotNull { (roleId, modeName) ->
+                val role = roles.firstOrNull { it.id == roleId }
+                val mode = runCatching { CalibrationMode.valueOf(modeName) }.getOrNull()
+                if (role != null && mode != null) role to mode else null
+            }?.toMap().orEmpty()
+            val restoredDurations = savedCheckpoint?.selectedDurations?.mapNotNull { (roleId, minutes) ->
+                roles.firstOrNull { it.id == roleId }?.let { it to minutes.coerceIn(10, 120) }
+            }?.toMap().orEmpty()
+            val selectedDurations = _calibrationDurations.value.toMutableMap().apply { putAll(restoredDurations) }
+            val selectedModes = _calibrationModes.value.toMutableMap().apply { putAll(restoredModes) }
+            if (savedCheckpoint != null) {
+                _calibrationDurations.value = selectedDurations
+                _calibrationModes.value = selectedModes
+            }
             val sacePrefs = getApplication<Application>().getSharedPreferences("sace_progress", 0)
             val sessionNumber = savedCheckpoint?.sessionNumber?.takeIf { it > 0 } ?: saceProgressStore.beginSession()
             val isSurpriseSession = sessionNumber % 5 == 0
             val report = StringBuilder("SACE — sessão #$sessionNumber")
             var completed = 0
-            val hasUltimate = selectedModes.values.any { it == CalibrationMode.ULTIMATE }
-            val total = if (hasUltimate) 0 else roles.sumOf { role ->
-                val mode = selectedModes[role] ?: CalibrationMode.NORMAL
-                when (mode) {
-                    CalibrationMode.NORMAL -> 3
-                    CalibrationMode.ADVANCED -> 6
-                    CalibrationMode.ULTIMATE -> 0
-                }
-            } + if (isSurpriseSession) roles.size else 0
+            val total = 0 // Time-based calibration: exercises repeat until each selected agent reaches its target.
             _calibrationState.value = CalibrationUiState(isRunning = true, totalCases = total)
-            InferenceTaskForegroundService.startTask(getApplication())
+            var taskStarted = false
             try {
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
                 val resumeRoleIndex = savedCheckpoint?.let { cp -> roles.indexOfFirst { it.id == cp.roleId }.coerceAtLeast(0) } ?: 0
                 for (role in roles.drop(resumeRoleIndex)) {
                     val isResumingThisRole = savedCheckpoint?.roleId == role.id
                     val mode = if (isResumingThisRole) runCatching { CalibrationMode.valueOf(savedCheckpoint!!.mode) }.getOrDefault(selectedModes[role] ?: CalibrationMode.NORMAL) else (selectedModes[role] ?: CalibrationMode.NORMAL)
                     val durationMinutes = if (mode == CalibrationMode.ULTIMATE) 300 else selectedDurations.getValue(role)
-                    val roleStartedAt = if (isResumingThisRole) savedCheckpoint!!.startedAt else System.currentTimeMillis()
-                    val roleDeadline = roleStartedAt + durationMinutes * 60_000L
+                    // Only active calibration time counts; time while the app is paused/offline is excluded.
+                    var roleStartedAt = if (isResumingThisRole) {
+                        System.currentTimeMillis() - savedCheckpoint!!.elapsedMs.coerceAtLeast(0L)
+                    } else {
+                        System.currentTimeMillis()
+                    }
                     report.append("\n\n").append(role.displayName).append(" — ").append(mode.title)
-                        .append(": limite de ").append(durationMinutes).append(" min.")
+                        .append(": meta de ").append(durationMinutes).append(" min.")
                     _calibrationState.value = _calibrationState.value.copy(
-                        currentRole = role, currentCase = "Preparando " + role.displayName
+                        currentRole = role, currentCase = "Preparando " + role.displayName,
+                        currentElapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L),
+                        targetDurationMs = durationMinutes * 60_000L
                     )
                     val roleNotes = StringBuilder()
                     val pool = cases.getValue(role)
-                    val selectedPool = when (mode) {
-                        CalibrationMode.NORMAL -> pool.take(3)
-                        CalibrationMode.ADVANCED -> pool.take(6)
-                        CalibrationMode.ULTIMATE -> pool
-                    }
+                    // Every mode rotates through the complete role-specific curriculum.
+                    // Difficulty is expressed in the task prompt, not by silently dropping most topics.
+                    val selectedPool = pool
                     val initialOffset = sacePrefs.getInt("next_${role.id}", 0).coerceAtLeast(0)
                     var attempt = if (isResumingThisRole) savedCheckpoint!!.nextAttempt else 0
                     val exerciseBaseOffset = if (isResumingThisRole) initialOffset - attempt else initialOffset
-                    do {
-                        if (System.currentTimeMillis() >= roleDeadline) break
+                    var consecutiveFailures = 0
+                    while (System.currentTimeMillis() - roleStartedAt < durationMinutes * 60_000L) {
                         val cycle = attempt / selectedPool.size
                         val exerciseIndex = saceProgressStore.chooseExerciseIndex(
                             role.id, selectedPool.size, exerciseBaseOffset + attempt
@@ -677,14 +935,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             role == AgentRole.VISION -> visionStage[ultimateHour] + " "
                             else -> ""
                         }
-                        val prompt = if (isLinuxFinalHour) {
+                        val modeGuidance = when (mode) {
+                            CalibrationMode.NORMAL ->
+                                "MODO NORMAL: resolva o exercício de forma gradual. Mostre os fundamentos necessários, use palavras simples e explique somente o que ajuda a entender a solução."
+                            CalibrationMode.ADVANCED -> when (role) {
+                                AgentRole.CODING ->
+                                    "MODO AVANÇADO: trate o exercício como parte de um projeto real. Considere arquitetura, módulos, compatibilidade, tratamento de erros, estados de borda, testes e manutenção. Entregue uma solução completa, mas sem criar complexidade desnecessária."
+                                AgentRole.REASONING ->
+                                    "MODO AVANÇADO: compare pelo menos duas abordagens viáveis, avalie dependências, riscos e consequências. Escolha uma opção com justificativa e defina como verificar se ela funcionou."
+                                AgentRole.VISION ->
+                                    "MODO AVANÇADO: faça uma auditoria detalhada da interface. Avalie hierarquia, alinhamento, espaçamento, tipografia, contraste, estados e consistência; transforme os achados em mudanças visuais implementáveis."
+                            }
+                            CalibrationMode.ANALYSIS -> when (role) {
+                                AgentRole.CODING ->
+                                    "MODO ANÁLISE: não comece escrevendo a solução. Investigue requisitos, fluxo de dados, estrutura, dependências e possíveis falhas. Separe fatos de hipóteses, indique a causa mais provável e proponha testes que confirmem ou descartem cada hipótese."
+                                AgentRole.REASONING ->
+                                    "MODO ANÁLISE: decomponha o problema em fatos, incógnitas, hipóteses e relações causais. Procure contradições, compare evidências e explique qual informação ou teste reduziria mais a incerteza. Não aceite a primeira hipótese automaticamente."
+                                AgentRole.VISION ->
+                                    "MODO ANÁLISE: examine a imagem por regiões. Registre apenas elementos realmente visíveis, relações espaciais, estados e inconsistências. Separe observação, interpretação e dúvida; não proponha mudanças antes de identificar evidências."
+                            }
+                            CalibrationMode.CORRECTION -> when (role) {
+                                AgentRole.CODING ->
+                                    "MODO CORREÇÃO: trate a proposta, código ou arquitetura como possivelmente defeituosa. Localize erros concretos, explique a causa, apresente a versão corrigida e inclua testes de regressão. Não altere partes sem relação com o defeito."
+                                AgentRole.REASONING ->
+                                    "MODO CORREÇÃO: revise criticamente a conclusão ou plano. Encontre saltos lógicos, premissas sem prova, cálculos ou prioridades incorretos; corrija cada ponto e apresente uma conclusão coerente com as evidências."
+                                AgentRole.VISION ->
+                                    "MODO CORREÇÃO: identifique defeitos visuais comprováveis, localize cada um na tela e descreva a correção específica. Preserve os elementos que já funcionam e não invente defeitos que a imagem não mostra."
+                            }
+                            CalibrationMode.ULTIMATE ->
+                                "MODO ULTIMATE: trabalhe como um desafio de projeto em etapas. Integre os conhecimentos da etapa atual, confira dependências e apresente critérios verificáveis."
+                        }
+                        val repeatedChallenge = if (cycle == 0) "" else
+                            "Crie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
+                        val taskPrompt = if (isLinuxFinalHour) {
                             "DESAFIO FINAL LINUX: use somente o projeto de laboratório e os arquivos que forem fornecidos nesta tarefa. " +
                                 "Mapeie a estrutura, analise scripts, serviços, permissões e dependências; encontre erros; proponha melhorias; " +
                                 "reescreva apenas módulos selecionados e crie testes. Não afirme que analisou uma distribuição inteira nem que executou comandos. " +
                                 "Tarefa: " + basePrompt
-                        } else if (cycle == 0) stagePrefix + basePrompt else {
-                            stagePrefix + basePrompt + "\n\nCrie uma variação nova deste desafio, mudando dados, nomes, restrições ou cenário. Resolva a nova versão; não copie a resposta anterior."
+                        } else {
+                            basePrompt
                         }
+                        val reinforcementHint = saceProgressStore.reinforcementHint(role.id, exerciseIndex).orEmpty()
+                        val prompt = listOf(stagePrefix.trim(), modeGuidance, taskPrompt, repeatedChallenge, reinforcementHint)
+                            .filter { it.isNotBlank() }
+                            .joinToString("\n\n")
                         _calibrationState.value = _calibrationState.value.copy(
                             currentCase = role.displayName + " (" + mode.title + "): exercício " + (attempt + 1) +
                                 if (mode == CalibrationMode.ULTIMATE) " — ciclo " + (cycle + 1) else "",
@@ -692,9 +986,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         saceProgressStore.saveCheckpoint(
                             roleId = role.id, mode = mode.name, nextAttempt = attempt,
-                            startedAt = roleStartedAt, sessionNumber = sessionNumber
+                            startedAt = roleStartedAt, sessionNumber = sessionNumber,
+                            selectedModes = selectedModes.mapKeys { it.key.id }.mapValues { it.value.name },
+                            selectedDurations = selectedDurations.mapKeys { it.key.id },
+                            elapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L)
                         )
+                        val safeWaitStartedAt = System.currentTimeMillis()
                         awaitSafeSaceConditions()
+                        // Safety waits do not count toward the requested training duration.
+                        roleStartedAt += System.currentTimeMillis() - safeWaitStartedAt
+                        if (System.currentTimeMillis() - roleStartedAt >= durationMinutes * 60_000L) break
                         if (pauseRequested) throw kotlinx.coroutines.CancellationException("Pausa solicitada pelo usuário")
                         val calibrationImagePath = if (role == AgentRole.VISION) createCalibrationImage(attempt) else null
                         val turns = listOf(ChatTurn(
@@ -744,12 +1045,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             mode = mode.name,
                             nextAttempt = attempt + 1,
                             startedAt = roleStartedAt,
-                            sessionNumber = sessionNumber
+                            sessionNumber = sessionNumber,
+                            selectedModes = selectedModes.mapKeys { it.key.id }.mapValues { it.value.name },
+                            selectedDurations = selectedDurations.mapKeys { it.key.id },
+                            elapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L)
                         )
                         if (failure != null || output.isBlank()) {
-                            report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure)
-                            if (mode != CalibrationMode.ULTIMATE) break
+                            report.append("\n• ").append(role.displayName).append(" — falha: ").append(failure ?: "resposta vazia")
+                            consecutiveFailures++
+                            if (consecutiveFailures >= 3) {
+                                throw IllegalStateException("A calibração de ${role.displayName} falhou três vezes seguidas. Confira se há um modelo compatível associado e tente novamente.")
+                            }
+                            delay(1_500L)
                         } else {
+                            consecutiveFailures = 0
                             report.append("\n• ").append(role.displayName).append(" — exercício ")
                                 .append(attempt + 1).append(": inferência concluída")
                             if (evaluation != null) {
@@ -769,12 +1078,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (attemptSucceeded) completed++
                         attempt++
                         sacePrefs.edit().putInt("next_${role.id}", (exerciseBaseOffset + attempt) % selectedPool.size).apply()
-                        _calibrationState.value = _calibrationState.value.copy(completedCases = completed)
+                        _calibrationState.value = _calibrationState.value.copy(
+                            completedCases = completed,
+                            currentElapsedMs = (System.currentTimeMillis() - roleStartedAt).coerceAtLeast(0L),
+                            targetDurationMs = durationMinutes * 60_000L
+                        )
                         if (mode == CalibrationMode.ULTIMATE && attempt % 10 == 0) kotlinx.coroutines.delay(20_000L)
-                    } while (
-                        (mode == CalibrationMode.ULTIMATE && System.currentTimeMillis() < roleDeadline) ||
-                        (mode != CalibrationMode.ULTIMATE && attempt < selectedPool.size)
-                    )
+                    }
                     report.append("\n• ").append(role.displayName).append(": ")
                         .append(attempt).append(" tentativas nesta sessão.")
                     report.append("\n").append(saceProgressStore.summaryForRole(role.id))
@@ -863,8 +1173,95 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     error = error.message ?: "Falha inesperada na calibração."
                 )
             } finally {
-                container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração")
-                InferenceTaskForegroundService.finishTask(getApplication())
+                withContext(NonCancellable) {
+                    runCatching { container.inferenceRuntimeManager.unloadAllModels("Fim da sessão de calibração") }
+                    if (taskStarted) runCatching { InferenceTaskForegroundService.finishTask(getApplication()) }
+                }
+            }
+        }
+    }
+
+
+    /**
+     * Runs a fixed evaluation set kept separate from calibration/adaptive history.
+     * Scores are second-pass estimates from the same agent, not independent ground truth.
+     */
+    fun runSaceBenchmark() {
+        if (_calibrationState.value.isRunning || _calibrationState.value.isBenchmarkRunning) return
+        if (calibrationJob?.isCompleted == false || benchmarkJob?.isCompleted == false) return
+        benchmarkJob = viewModelScope.launch {
+            val cases = SaceBenchmarkDataset.cases
+            val benchmarkRunId = saceBenchmarkStore.beginRun()
+            _calibrationState.value = _calibrationState.value.copy(
+                isBenchmarkRunning = true, benchmarkProgress = 0,
+                benchmarkReport = "", benchmarkError = null, thermalMessage = null
+            )
+            var taskStarted = false
+            try {
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
+                cases.forEachIndexed { index, testCase ->
+                    awaitSafeSaceConditions()
+                    val role = when (testCase.roleId) {
+                        "coding" -> AgentRole.CODING
+                        "reasoning" -> AgentRole.REASONING
+                        else -> AgentRole.VISION
+                    }
+                    val imagePath = if (role == AgentRole.VISION) createCalibrationImage(index + 40) else null
+                    val turns = listOf(ChatTurn("user", testCase.prompt, imagePath = imagePath))
+                    var output = ""
+                    var failure: String? = null
+                    val stream = when (role) {
+                        AgentRole.CODING -> container.codingAgent.streamExecute(turns, "SACE_BENCHMARK", maxTokensOverride = 420)
+                        AgentRole.REASONING -> container.reasoningAgent.streamExecute(turns, "SACE_BENCHMARK", maxTokensOverride = 300)
+                        AgentRole.VISION -> container.visionAgent.streamExecute(turns, "SACE_BENCHMARK", maxTokensOverride = 240)
+                    }
+                    stream.collect { event ->
+                        when (event) {
+                            is InferenceStreamEvent.Token -> output += event.text
+                            is InferenceStreamEvent.Completed -> output = event.fullText.ifBlank { output }
+                            is InferenceStreamEvent.Failed -> failure = event.errorMessage
+                            else -> Unit
+                        }
+                    }
+                    val succeeded = failure == null && output.isNotBlank()
+                    val evaluation = if (succeeded) {
+                        runCatching { evaluateCalibrationAnswer(role, testCase.prompt, output, imagePath) }.getOrNull()
+                    } else null
+                    saceBenchmarkStore.record(
+                        SaceBenchmarkResult(
+                            caseId = testCase.id, roleId = testCase.roleId, skill = testCase.skill,
+                            completed = succeeded, score = evaluation?.score, confidence = evaluation?.confidence,
+                            feedback = evaluation?.feedback ?: failure.orEmpty(),
+                            outputPreview = output.take(400), timestamp = System.currentTimeMillis(), runId = benchmarkRunId
+                        )
+                    )
+                    _calibrationState.value = _calibrationState.value.copy(
+                        benchmarkProgress = index + 1,
+                        benchmarkReport = saceBenchmarkStore.summary()
+                    )
+                }
+                saceBenchmarkStore.completeRun(benchmarkRunId)
+                _calibrationState.value = _calibrationState.value.copy(
+                    isBenchmarkRunning = false, benchmarkReport = saceBenchmarkStore.summary(),
+                    benchmarkError = null, thermalMessage = null
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isBenchmarkRunning = false, benchmarkError = "Benchmark interrompido."
+                )
+                throw cancelled
+            } catch (error: Exception) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isBenchmarkRunning = false,
+                    benchmarkReport = saceBenchmarkStore.summary(),
+                    benchmarkError = error.message ?: "Falha ao executar benchmark."
+                )
+            } finally {
+                withContext(NonCancellable) {
+                    runCatching { container.inferenceRuntimeManager.unloadAllModels("Fim do SACE Benchmark") }
+                    if (taskStarted) runCatching { InferenceTaskForegroundService.finishTask(getApplication()) }
+                }
             }
         }
     }
@@ -873,14 +1270,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!_calibrationState.value.isRunning) return
         pauseRequested = true
         calibrationJob?.cancel()
-        calibrationJob = null
-        viewModelScope.launch {
-            container.inferenceRuntimeManager.unloadAllModels("SACE pausado pelo usuário")
-        }
+        // The cancelled job performs model/service cleanup in a NonCancellable finally block.
+        // Keeping its Job reference prevents a new session from racing that cleanup.
     }
 
     fun resumeCalibration() {
-        if (_calibrationState.value.isRunning || saceProgressStore.readCheckpoint() == null) return
+        if (_calibrationState.value.isRunning || calibrationJob?.isCompleted == false ||
+            benchmarkJob?.isCompleted == false || saceProgressStore.readCheckpoint() == null) return
         startCalibration(resume = true)
     }
 
@@ -935,25 +1331,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // --- Multi-Agent Orchestrator ---
     fun setMultiAgentImageUri(uri: Uri?) {
         viewModelScope.launch(Dispatchers.IO) {
+            // Publish the URI only after its private cache copy is ready. This prevents
+            // an immediate Run tap from submitting the previous image path (or no image).
+            val copiedPath = uri?.let { copyImageToCache(it, "multiagent_input") }
+            _multiAgentImagePath.value = copiedPath
             _multiAgentImageUri.value = uri
-            _multiAgentImagePath.value = uri?.let { copyImageToCache(it, "multiagent_input") }
+            if (uri != null && copiedPath == null) {
+                _uiBannerMessage.value = "Não foi possível preparar a imagem. Selecione-a novamente antes de executar."
+            }
         }
     }
 
     fun runMultiAgentTask(prompt: String) {
-        if (prompt.isBlank()) return
-        viewModelScope.launch {
-            InferenceTaskForegroundService.startTask(getApplication())
+        val normalizedPrompt = prompt.trim()
+        if (normalizedPrompt.isBlank()) {
+            _uiBannerMessage.value = "Digite uma tarefa antes de iniciar o Multiagente."
+            return
+        }
+        if (_multiAgentImageUri.value != null && _multiAgentImagePath.value == null) {
+            _uiBannerMessage.value = "A imagem ainda não está pronta ou não pôde ser copiada. Selecione-a novamente."
+            return
+        }
+        if (multiAgentUiJob?.isActive == true || multiAgentLiveState.value.isRunning) {
+            _uiBannerMessage.value = "O Multiagente já está executando uma tarefa."
+            return
+        }
+
+        val submittedImagePath = _multiAgentImagePath.value
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val thisJob = currentCoroutineContext()[Job]
+            var taskStarted = false
             try {
-                container.multiAgentOrchestrator.executeMultiAgentTask(
-                    userRequest = prompt.trim(),
-                    imagePath = _multiAgentImagePath.value,
+                InferenceTaskForegroundService.startTask(getApplication())
+                taskStarted = true
+                val result = container.multiAgentOrchestrator.executeMultiAgentTask(
+                    userRequest = normalizedPrompt,
+                    imagePath = submittedImagePath,
                     source = "UI"
                 )
+                val failure = result.exceptionOrNull()
+                if (failure != null && failure !is CancellationException) {
+                    val detail = failure.message?.takeIf { it.isNotBlank() } ?: "erro desconhecido"
+                    // Validation failures can be returned before the orchestrator updates
+                    // its live state, so surface them here instead of silently ignoring Result.
+                    if (multiAgentLiveState.value.error != detail) {
+                        _uiBannerMessage.value = "Multiagente não concluiu a tarefa: $detail"
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.java.simpleName
+                _uiBannerMessage.value = "Falha ao iniciar o Multiagente: $detail"
             } finally {
-                InferenceTaskForegroundService.finishTask(getApplication())
+                if (taskStarted) {
+                    runCatching { InferenceTaskForegroundService.finishTask(getApplication()) }
+                }
+                if (multiAgentUiJob === thisJob) {
+                    multiAgentUiJob = null
+                }
             }
         }
+        // Lazy start makes the duplicate-submission guard effective even on rapid taps.
+        multiAgentUiJob = job
+        job.start()
     }
 
     fun cancelMultiAgentTask() {
@@ -986,6 +1427,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             container.settingsRepository.updateRamLimitMb(limitMb)
             container.memoryBudgetManager.updateUserRamLimitMb(limitMb)
             container.modelRepository.revalidateAllModels()
+        }
+    }
+
+    fun updateSystemRamReserveMb(reserveMb: Long) {
+        viewModelScope.launch {
+            container.settingsRepository.updateSystemRamReserveMb(reserveMb)
+            container.memoryBudgetManager.updateSystemRamReserveMb(reserveMb)
         }
     }
 
@@ -1052,6 +1500,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             container.settingsRepository.resetToDefaults()
             val defaults = AppSettings()
             container.memoryBudgetManager.updateUserRamLimitMb(defaults.ramLimitMb)
+            container.memoryBudgetManager.updateSystemRamReserveMb(defaults.systemRamReserveMb)
             container.modelRepository.revalidateAllModels()
             _uiBannerMessage.value = "Configurações restauradas para o padrão de fábrica."
         }

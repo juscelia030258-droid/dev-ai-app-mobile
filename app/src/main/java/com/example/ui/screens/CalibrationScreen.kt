@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -31,17 +32,20 @@ fun CalibrationScreen(
     state: CalibrationUiState,
     durations: Map<AgentRole, Int>,
     modes: Map<AgentRole, CalibrationMode>,
+    selectedAgents: Set<AgentRole>,
+    onAgentSelectionChange: (AgentRole, Boolean) -> Unit,
     onModeChange: (AgentRole, CalibrationMode) -> Unit,
     onDurationChange: (AgentRole, Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onResume: () -> Unit,
-    onDiscardCheckpoint: () -> Unit
+    onDiscardCheckpoint: () -> Unit,
+    onBenchmark: () -> Unit
 ) {
     val agents = listOf(
-        Triple(AgentRole.CODING, "Firmware, menus funcionais, configurações, Kotlin, Python, depuração e Linux no Ultimate.", 1..120),
-        Triple(AgentRole.REASONING, "Lógica, tecnologia, investigação, planejamento e colaboração entre agentes.", 1..90),
-        Triple(AgentRole.VISION, "Interfaces, leitura visual, relações espaciais e revisão de imagens.", 1..60)
+        Triple(AgentRole.CODING, "Firmware, menus funcionais, configurações, Kotlin, Python, depuração e Linux no Ultimate.", 10..120),
+        Triple(AgentRole.REASONING, "Lógica, tecnologia, investigação, planejamento e colaboração entre agentes.", 10..90),
+        Triple(AgentRole.VISION, "Interfaces, leitura visual, relações espaciais e revisão de imagens.", 10..60)
     )
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -49,10 +53,24 @@ fun CalibrationScreen(
     ) {
         Text("AI Calibration Lab", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "Escolha o tempo máximo de cada agente. O aplicativo calibra um modelo por vez e encerra cada etapa ao concluir os exercícios ou atingir o limite escolhido.",
+            "Escolha o tempo de treinamento de cada agente (mínimo de 10 minutos). Os exercícios se repetem até o tempo ser cumprido; a calibração não termina só porque acabou a primeira lista.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Text("Selecione quais IAs deseja treinar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        agents.forEach { (role, detail, _) ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(role.displayName, modifier = Modifier.weight(1f))
+                Checkbox(
+                    checked = role in selectedAgents,
+                    onCheckedChange = { onAgentSelectionChange(role, it) },
+                    enabled = !state.isRunning && !state.isBenchmarkRunning && !state.canResume
+                )
+            }
+        }
         agents.forEach { (role, detail, range) ->
             val minutes = durations[role] ?: 20
             val mode = modes[role] ?: CalibrationMode.NORMAL
@@ -69,17 +87,28 @@ fun CalibrationScreen(
                         )
                     }
                     Text(detail, style = MaterialTheme.typography.bodySmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        CalibrationMode.entries.forEach { option ->
-                            if (mode == option) {
-                                Button(onClick = { onModeChange(role, option) }, enabled = !state.isRunning) {
-                                    Text(option.title)
-                                }
-                            } else {
-                                OutlinedButton(onClick = { onModeChange(role, option) }, enabled = !state.isRunning) {
-                                    Text(option.title)
+                    CalibrationMode.entries.chunked(3).forEach { modeRow ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            modeRow.forEach { option ->
+                                if (mode == option) {
+                                    Button(
+                                        onClick = { onModeChange(role, option) },
+                                        enabled = !state.isRunning && !state.isBenchmarkRunning,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(option.title, maxLines = 1)
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = { onModeChange(role, option) },
+                                        enabled = !state.isRunning && !state.isBenchmarkRunning,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(option.title, maxLines = 1)
+                                    }
                                 }
                             }
+                            repeat(3 - modeRow.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                     Text(mode.description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -88,15 +117,25 @@ fun CalibrationScreen(
                     } else {
                         Slider(
                             value = minutes.toFloat(),
-                            onValueChange = { onDurationChange(role, it.toInt().coerceIn(range.first, range.last)) },
+                            onValueChange = { onDurationChange(role, it.toInt().coerceIn(10, range.last)) },
                             valueRange = range.first.toFloat()..range.last.toFloat(),
                             steps = range.last - range.first - 1,
-                            enabled = !state.isRunning
+                            enabled = !state.isRunning && !state.isBenchmarkRunning
                         )
-                        Text("De " + range.first + " a " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Mínimo de 10 minutos • até " + range.last + " minutos", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
+        }
+        if (state.isBenchmarkRunning) {
+            Text("Benchmark separado — " + state.benchmarkProgress + " / 9 casos", fontWeight = FontWeight.SemiBold)
+            LinearProgressIndicator(progress = { (state.benchmarkProgress.toFloat() / 9f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            state.thermalMessage?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        state.benchmarkError?.let {
+            Text("Benchmark: " + it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
         if (state.isRunning) {
             Text(state.currentCase, fontWeight = FontWeight.SemiBold)
@@ -108,7 +147,12 @@ fun CalibrationScreen(
                 Text(state.completedCases.toString() + " / " + state.totalCases + " exercícios")
             } else {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                Text(state.completedCases.toString() + " exercícios concluídos — sessão Ultimate")
+                Text(state.completedCases.toString() + " exercícios concluídos • treinamento por tempo")
+            }
+            if (state.targetDurationMs > 0L) {
+                val elapsedMinutes = state.currentElapsedMs / 60_000L
+                val targetMinutes = state.targetDurationMs / 60_000L
+                Text("Tempo de treinamento: $elapsedMinutes / $targetMinutes min", style = MaterialTheme.typography.labelMedium)
             }
             if (state.latestOutput.isNotBlank()) {
                 Card(Modifier.fillMaxWidth()) {
@@ -119,7 +163,7 @@ fun CalibrationScreen(
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
             OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Pausar e salvar progresso") }
-        } else {
+        } else if (!state.isBenchmarkRunning) {
             if (state.canResume) {
                 Text(
                     state.currentCase.ifBlank { "Existe uma sessão SACE que pode ser retomada." },
@@ -129,8 +173,17 @@ fun CalibrationScreen(
                 Button(onClick = onResume, modifier = Modifier.fillMaxWidth()) { Text("Retomar sessão salva") }
                 OutlinedButton(onClick = onDiscardCheckpoint, modifier = Modifier.fillMaxWidth()) { Text("Descartar sessão salva") }
             }
-            Button(onClick = onStart, modifier = Modifier.fillMaxWidth(), enabled = !state.canResume) {
+            Button(onClick = onStart, modifier = Modifier.fillMaxWidth(), enabled = !state.canResume && selectedAgents.isNotEmpty()) {
                 Text(if (state.canResume) "Descarte a sessão para iniciar outra" else "Iniciar calibração completa")
+            }
+        }
+        if (state.benchmarkReport.isNotBlank()) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp)) {
+                    Text("Resultado do benchmark", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(state.benchmarkReport, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
         state.error?.let { Text("Aviso: " + it, color = MaterialTheme.colorScheme.error) }
@@ -143,8 +196,9 @@ fun CalibrationScreen(
                 }
             }
         }
+        OutlinedButton(onClick = onBenchmark, modifier = Modifier.fillMaxWidth(), enabled = !state.isRunning && !state.isBenchmarkRunning) { Text("Executar benchmark (9 testes)") }
         Text(
-            "O modo Ultimate reserva 5 horas para cada IA selecionada. O tempo é um limite, não uma garantia de que o Android manterá o processo ativo. A calibração usa exemplos e instruções; não altera os pesos dos modelos.",
+            "Cada IA selecionada treina pelo tempo configurado (mínimo de 10 minutos; Ultimate = 5 horas). O tempo em espera por segurança não conta. A calibração melhora instruções e referências, mas não altera os pesos do modelo.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

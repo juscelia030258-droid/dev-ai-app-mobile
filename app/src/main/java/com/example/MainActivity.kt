@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
@@ -54,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,6 +130,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun LocalDevAiRoot(viewModel: MainViewModel) {
     val navController = rememberNavController()
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
     val snackbarHostState = remember { SnackbarHostState() }
@@ -157,6 +160,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
     val calibrationState by viewModel.calibrationState.collectAsStateWithLifecycle()
     val calibrationDurations by viewModel.calibrationDurations.collectAsStateWithLifecycle()
     val calibrationModes by viewModel.calibrationModes.collectAsStateWithLifecycle()
+    val selectedCalibrationRoles by viewModel.selectedCalibrationRoles.collectAsStateWithLifecycle()
 
     LaunchedEffect(bannerMessage) {
         val msg = bannerMessage
@@ -211,7 +215,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                 }
             },
             bottomBar = {
-                if (!useRail) {
+                if (!useRail && !imeVisible) {
                     Column {
                         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         NavigationBar(
@@ -328,6 +332,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             onSelectVisionImage = viewModel::setVisionImageUri,
                             onRunPrompt = viewModel::runAgentConsolePrompt,
                             onStopPrompt = viewModel::stopAgentConsole,
+                            onClearConsole = viewModel::clearAgentConsole,
                             onBannerMessage = viewModel::showBanner
                         )
                     }
@@ -393,12 +398,15 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             state = calibrationState,
                             durations = calibrationDurations,
                             modes = calibrationModes,
+                            selectedAgents = selectedCalibrationRoles,
+                            onAgentSelectionChange = viewModel::setCalibrationAgentSelected,
                             onModeChange = viewModel::setCalibrationMode,
                             onDurationChange = viewModel::setCalibrationDuration,
                             onStart = { viewModel.startCalibration() },
                             onStop = viewModel::pauseCalibration,
                             onResume = viewModel::resumeCalibration,
-                            onDiscardCheckpoint = viewModel::discardCalibrationCheckpoint
+                            onDiscardCheckpoint = viewModel::discardCalibrationCheckpoint,
+                            onBenchmark = viewModel::runSaceBenchmark
                         )
                     }
                     composable<SettingsRoute> {
@@ -409,6 +417,7 @@ fun LocalDevAiRoot(viewModel: MainViewModel) {
                             isRunningDiagnostics = isRunningDiagnostics,
                             onUpdatePort = viewModel::updateServerPort,
                             onUpdateRamLimit = viewModel::updateRamLimitMb,
+                            onUpdateSystemRamReserve = viewModel::updateSystemRamReserveMb,
                             onUpdateLanOnly = viewModel::updateLanOnlyMode,
                             onUpdateRateLimit = viewModel::updateRateLimit,
                             onUpdateMaxRevisions = viewModel::updateMaxRevisions,

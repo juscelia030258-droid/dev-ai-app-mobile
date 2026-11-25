@@ -46,6 +46,7 @@ class InferenceRuntimeManager(
     private var activeRuntime: LocalInferenceRuntime? = null
     private var activeModelEntity: LocalModelEntity? = null
     private var activeContextLength: Int = 0
+    private var activeThreadCount: Int = 0
     @Volatile
     private var lastActivityMs: Long = 0L
 
@@ -221,7 +222,8 @@ class InferenceRuntimeManager(
             activeModelEntity?.mmprojPath == model.mmprojPath &&
             activeContextLength > 0 &&
             activeContextLength >= requestedCtx &&
-            activeRuntime == targetRuntime
+            activeRuntime == targetRuntime &&
+            (format != ModelFormat.LITERT_LM || activeThreadCount == params.threads.coerceIn(1, 6))
         ) {
             val existing = memoryBudgetManager.state.value.loadedModels.firstOrNull()
             if (existing != null) {
@@ -336,6 +338,7 @@ class InferenceRuntimeManager(
                 activeRuntime = liteRtCpuRuntime
                 activeModelEntity = model
                 activeContextLength = targetCtx
+                activeThreadCount = params.threads.coerceIn(1, 6)
                 lastActivityMs = System.currentTimeMillis()
                 val snap = LoadedModelSnapshot(
                     modelId = model.id,
@@ -368,6 +371,7 @@ class InferenceRuntimeManager(
         activeRuntime = targetRuntime
         activeModelEntity = model
         activeContextLength = targetCtx
+        activeThreadCount = params.threads.coerceIn(1, 6)
         lastActivityMs = System.currentTimeMillis()
         val snapshot = LoadedModelSnapshot(
             modelId = model.id,
@@ -386,6 +390,7 @@ class InferenceRuntimeManager(
         activeRuntime = null
         activeModelEntity = null
         activeContextLength = 0
+        activeThreadCount = 0
         lastActivityMs = 0L
         if (runtime != null) {
             runCatching { runtime.unloadModel() }
