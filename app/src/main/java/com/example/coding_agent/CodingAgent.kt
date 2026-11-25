@@ -3,6 +3,7 @@ package com.example.coding_agent
 import com.example.core.model.AgentRole
 import com.example.core.model.InferenceParameters
 import com.example.core.model.RuntimeBackend
+import com.example.inference.AdaptiveOutputBudget
 import com.example.inference.ChatTurn
 import com.example.inference.InferenceExecutionResult
 import com.example.inference.InferenceRuntimeManager
@@ -102,7 +103,12 @@ class CodingAgent(
 
         val params = InferenceParameters(
             contextLength = cfg.contextLength,
-            maxTokens = maxTokensOverride ?: cfg.maxTokens,
+            maxTokens = AdaptiveOutputBudget.choose(
+                role = AgentRole.CODING,
+                messages = messages,
+                configuredMaxTokens = maxTokensOverride ?: cfg.maxTokens,
+                contextLength = cfg.contextLength
+            ),
             temperature = temperatureOverride ?: cfg.temperature,
             topP = cfg.topP,
             topK = cfg.topK,
