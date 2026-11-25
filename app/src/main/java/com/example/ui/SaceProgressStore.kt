@@ -82,20 +82,29 @@ class SaceProgressStore(context: Context) {
         evaluationFeedback: String? = null
     ) = synchronized(lock) {
         val attempts = readAttempts()
-        attempts.put(
-            JSONObject()
-                .put("role", roleId)
-                .put("index", exerciseIndex)
-                .put("exerciseId", "$roleId:$exerciseIndex")
-                .put("skill", skill.take(80))
-                .put("completed", completed)
-                .put("outputChars", outputChars.coerceAtLeast(0))
-                .put("error", error.orEmpty().take(180))
-                .put("qualityScore", qualityScore?.coerceIn(0, 100) ?: -1)
-                .put("evaluationConfidence", evaluationConfidence?.coerceIn(0, 100) ?: -1)
-                .put("evaluationFeedback", evaluationFeedback.orEmpty().take(240))
-                .put("time", System.currentTimeMillis())
-        )
+        val exerciseId = "$roleId:$exerciseIndex"
+        val updatedRecord = JSONObject()
+            .put("role", roleId)
+            .put("index", exerciseIndex)
+            .put("exerciseId", exerciseId)
+            .put("skill", skill.take(80))
+            .put("completed", completed)
+            .put("outputChars", outputChars.coerceAtLeast(0))
+            .put("error", error.orEmpty().take(180))
+            .put("qualityScore", qualityScore?.coerceIn(0, 100) ?: -1)
+            .put("evaluationConfidence", evaluationConfidence?.coerceIn(0, 100) ?: -1)
+            .put("evaluationFeedback", evaluationFeedback.orEmpty().take(240))
+            .put("time", System.currentTimeMillis())
+
+        // A retry from the same agent and curriculum source updates the same exercise.
+        // This prevents one failed attempt followed by a successful retry from counting twice.
+        val existingIndex = (0 until attempts.length()).lastOrNull { index ->
+            val item = attempts.optJSONObject(index) ?: return@lastOrNull false
+            item.optString("role") == roleId && item.optString("exerciseId") == exerciseId
+        }
+        if (existingIndex != null) attempts.put(existingIndex, updatedRecord)
+        else attempts.put(updatedRecord)
+
         while (attempts.length() > MAX_ATTEMPTS) attempts.remove(0)
         prefs.edit().putString(KEY_ATTEMPTS, attempts.toString()).apply()
     }
