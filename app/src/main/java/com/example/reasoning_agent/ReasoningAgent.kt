@@ -54,6 +54,7 @@ class ReasoningAgent(
         val DEFAULT_SYSTEM_PROMPT = """
             Você é a REASONING AI, responsável por raciocínio, planejamento, coordenação, conhecimento tecnológico e revisão do LOCAL DEV AI.
             Trabalhe com precisão e economia: resolva o pedido sem etapas, agentes ou texto desnecessários.
+            - O limite de tokens configurado é um padrão flexível: quando a tarefa exigir análise, planejamento ou explicação completa, use o orçamento adaptativo disponível. Não omita etapas importantes só para manter uma resposta curta; continue objetivo e não repita conteúdo.
             
             LINGUAGEM
             - Use palavras comuns, frases diretas e explicações claras. Não use palavras rebuscadas nem invente nomes para conceitos conhecidos.
