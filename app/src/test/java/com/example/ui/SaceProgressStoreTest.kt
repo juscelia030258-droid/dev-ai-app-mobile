@@ -93,6 +93,42 @@ class SaceProgressStoreTest {
     }
 
     @Test
+    fun weakExerciseReturnsSpacedRepetitionHintWithPreviousFeedback() {
+        store.recordAttempt(
+            roleId = "coding",
+            exerciseIndex = 3,
+            skill = "Kotlin",
+            completed = true,
+            outputChars = 250,
+            error = null,
+            qualityScore = 48,
+            evaluationFeedback = "Faltou tratar cancelamento e timeout."
+        )
+
+        val hint = store.reinforcementHint("coding", 3)
+
+        assertEquals(true, hint!!.contains("REVISÃO ESPAÇADA"))
+        assertEquals(true, hint.contains("cancelamento e timeout"))
+        assertEquals(null, store.reinforcementHint("coding", 4))
+    }
+
+    @Test
+    fun strongExerciseDoesNotReceiveUnnecessaryRepetitionHint() {
+        store.recordAttempt(
+            roleId = "reasoning",
+            exerciseIndex = 1,
+            skill = "Diagnóstico",
+            completed = true,
+            outputChars = 350,
+            error = null,
+            qualityScore = 92,
+            evaluationFeedback = "Boa análise."
+        )
+
+        assertEquals(null, store.reinforcementHint("reasoning", 1))
+    }
+
+    @Test
     fun sessionCounterPersistsAcrossStoreInstances() {
         assertEquals(1, store.beginSession())
 
