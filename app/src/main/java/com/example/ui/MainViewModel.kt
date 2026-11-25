@@ -684,6 +684,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             model == null -> "${role.displayName}: o modelo associado não existe mais no catálogo."
                             role == AgentRole.VISION && !model.supportsVision ->
                                 "Vision AI precisa de um modelo multimodal com suporte real a imagens."
+                            role == AgentRole.VISION && model.format.equals("GGUF", ignoreCase = true) &&
+                                (model.mmprojPath.isNullOrBlank() || !File(model.mmprojPath).isFile) ->
+                                "O modelo GGUF da Vision AI está sem um arquivo mmproj válido."
                             else -> null
                         }
                     }
