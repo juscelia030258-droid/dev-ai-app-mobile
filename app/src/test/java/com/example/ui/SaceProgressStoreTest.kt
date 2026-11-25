@@ -61,6 +61,17 @@ class SaceProgressStoreTest {
     }
 
     @Test
+    fun retryingSameExerciseReplacesFailureInsteadOfCountingTwice() {
+        store.recordAttempt("vision", 4, "Reconhecimento visual", false, 0, "Resposta vazia")
+        store.recordAttempt("vision", 4, "Reconhecimento visual", true, 420, null, qualityScore = 82)
+
+        val summary = store.summaryForRole("vision")
+
+        assertEquals(true, summary.contains("1 exercícios concluídos, 0 falhas"))
+        assertEquals(true, summary.contains("Reconhecimento visual"))
+    }
+
+    @Test
     fun sessionCounterPersistsAcrossStoreInstances() {
         assertEquals(1, store.beginSession())
 
