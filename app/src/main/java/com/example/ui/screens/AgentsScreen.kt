@@ -61,6 +61,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.minimumInteractiveComponentSize
 import coil.compose.AsyncImage
@@ -115,6 +116,7 @@ fun AgentsScreen(
     val (stateLabel, stateColor) = runtimeStateLabel(rtState)
 
     var promptInput by remember(selectedRole) { mutableStateOf("") }
+    var outputExpanded by remember(selectedRole) { mutableStateOf(false) }
     var customSystemPrompt by remember(selectedRole, currentConfig.systemPromptOverride) {
         mutableStateOf(currentConfig.systemPromptOverride.orEmpty().replace("[CODING_REASONING_PROFILE]", "").trim())
     }
@@ -624,8 +626,15 @@ fun AgentsScreen(
                             text = consoleState.output,
                             fontFamily = MonoFontFamily,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = if (outputExpanded) Int.MAX_VALUE else 8,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (consoleState.output.length > 500) {
+                            TextButton(onClick = { outputExpanded = !outputExpanded }) {
+                                Text(if (outputExpanded) "Recolher resposta" else "Ver resposta completa")
+                            }
+                        }
                     }
                 }
             }
