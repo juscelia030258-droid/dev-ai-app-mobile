@@ -203,8 +203,24 @@ class SaceProgressStore(context: Context) {
         check(prefs.edit().remove(KEY_CHECKPOINT).commit()) { "Não foi possível limpar o checkpoint do SACE." }
     }
 
-    private fun readAttempts(): JSONArray =
-        runCatching { JSONArray(prefs.getString(KEY_ATTEMPTS, "[]")) }.getOrDefault(JSONArray())
+    private fun readAttempts(): JSONArray {
+        val stored = runCatching { JSONArray(prefs.getString(KEY_ATTEMPTS, "[]")) }.getOrDefault(JSONArray())
+        // Collapse legacy duplicate retries, keeping only the newest result for each
+        // agent + exercise pair so older histories are corrected when read.
+        val latestByExercise = linkedMapOf<String, JSONObject>()
+        for (index in 0 until stored.length()) {
+            val item = stored.optJSONObject(index) ?: continue
+            val role = item.optString("role")
+            val exerciseId = item.optString("exerciseId").ifBlank {
+                "$role:${item.optInt("index", -1)}"
+            }
+            if (role.isBlank() || exerciseId.endsWith(":-1")) continue
+            val key = "$role|$exerciseId"
+            latestByExercise.remove(key)
+            latestByExercise[key] = item
+        }
+        return JSONArray().apply { latestByExercise.values.forEach { put(it) } }
+    }
 
     companion object {
         private const val KEY_SESSION_COUNT = "session_count"
