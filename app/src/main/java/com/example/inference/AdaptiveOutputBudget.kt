@@ -9,7 +9,7 @@ import com.example.core.model.AgentRole
  */
 object AdaptiveOutputBudget {
     private const val HARD_RUNTIME_LIMIT = 4096
-    private const val CONTEXT_SAFETY_RESERVE = 512
+    private const val CONTEXT_SAFETY_RESERVE = 1024
 
     fun choose(
         role: AgentRole,
