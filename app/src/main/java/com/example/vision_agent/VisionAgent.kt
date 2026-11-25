@@ -148,6 +148,7 @@ class VisionAgent(
         val startTime = System.currentTimeMillis()
         var lastError: String? = null
         var fullOutput = ""
+        val streamedOutput = StringBuilder()
 
         runtimeManager.streamInference(
             role = AgentRole.VISION,
@@ -160,9 +161,13 @@ class VisionAgent(
             when (ev) {
                 // Forward real tokens so the console visibly updates during inference.
                 // The final answer is cleaned before it replaces the temporary streamed text.
-                is InferenceStreamEvent.Token -> emit(ev)
+                is InferenceStreamEvent.Token -> {
+                    streamedOutput.append(ev.text)
+                    emit(ev)
+                }
                 is InferenceStreamEvent.Completed -> {
-                    fullOutput = cleanVisualAnswer(ev.fullText)
+                    val rawFinalText = ev.fullText.takeIf { it.isNotBlank() } ?: streamedOutput.toString()
+                    fullOutput = cleanVisualAnswer(rawFinalText)
                     if (fullOutput.isBlank()) {
                         lastError = "Vision AI concluiu sem produzir texto."
                         emit(InferenceStreamEvent.Failed(lastError!!))
