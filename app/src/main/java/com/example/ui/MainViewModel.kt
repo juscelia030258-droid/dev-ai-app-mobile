@@ -974,7 +974,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             basePrompt
                         }
-                        val prompt = listOf(stagePrefix.trim(), modeGuidance, taskPrompt, repeatedChallenge)
+                        val reinforcementHint = saceProgressStore.reinforcementHint(role.id, exerciseIndex).orEmpty()
+                        val prompt = listOf(stagePrefix.trim(), modeGuidance, taskPrompt, repeatedChallenge, reinforcementHint)
                             .filter { it.isNotBlank() }
                             .joinToString("\n\n")
                         _calibrationState.value = _calibrationState.value.copy(
