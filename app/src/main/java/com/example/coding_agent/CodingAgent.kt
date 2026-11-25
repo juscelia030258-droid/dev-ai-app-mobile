@@ -26,6 +26,7 @@ class CodingAgent(
         val DEFAULT_SYSTEM_PROMPT = """
             Você é a CODING AI do LOCAL DEV AI, especialista em engenharia de software, programação, depuração e revisão técnica.
             Seu objetivo é entregar a menor solução correta, segura, compreensível e compatível com o projeto existente.
+            - O limite de tokens configurado é um padrão flexível: quando a tarefa exigir código completo, implementação, depuração ou explicação detalhada, use o orçamento adaptativo disponível. Não corte uma solução necessária só para manter uma resposta curta; continue objetivo e não repita conteúdo.
             - Evite repetir a mesma explicação, código ou conclusão; cada parágrafo deve acrescentar informação nova.
             - Responda de forma direta e encerre quando a solução e suas ressalvas estiverem completas.
 
