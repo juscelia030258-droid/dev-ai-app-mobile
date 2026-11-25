@@ -70,6 +70,32 @@ class SaceProgressStore(context: Context) {
         }
     }
 
+    /**
+     * Returns a short, evidence-based reminder for spaced repetition.
+     * Weak or failed topics return with a changed scenario and previous review feedback.
+     */
+    fun reinforcementHint(roleId: String, exerciseIndex: Int): String? = synchronized(lock) {
+        val exerciseId = "$roleId:$exerciseIndex"
+        val attempts = readAttempts()
+        val previous = (0 until attempts.length()).asSequence()
+            .mapNotNull { attempts.optJSONObject(it) }
+            .lastOrNull { it.optString("role") == roleId && it.optString("exerciseId") == exerciseId }
+            ?: return@synchronized null
+        val score = previous.optInt("qualityScore", -1)
+        val completed = previous.optBoolean("completed", false)
+        if (completed && score >= 85) return@synchronized null
+
+        val feedback = previous.optString("evaluationFeedback").ifBlank {
+            previous.optString("error")
+        }.take(500)
+        buildString {
+            append("REVISÃO ESPAÇADA — este assunto já foi praticado, mas precisa ser reforçado.")
+            if (score in 0..100) append(" Última nota estimada: $score/100.")
+            if (feedback.isNotBlank()) append(" Ponto anterior a revisar: ").append(feedback)
+            append(" Resolva um cenário diferente, explique o princípio por trás da solução e corrija o ponto fraco sem copiar uma resposta anterior.")
+        }
+    }
+
     fun recordAttempt(
         roleId: String,
         exerciseIndex: Int,
