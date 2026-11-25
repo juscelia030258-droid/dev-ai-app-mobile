@@ -668,6 +668,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 return@launch
             }
+
+            // Validate every selected agent before beginning the timed session.
+            // This prevents a session from appearing to start and failing only when it
+            // reaches an agent with no usable model or an incompatible Vision model.
+            val unavailableAgents = roles.mapNotNull { role ->
+                val config = container.database.agentConfigDao().getByRole(role.id)
+                    ?: AgentConfigEntity(roleId = role.id)
+                when {
+                    !config.enabled -> "${role.displayName} está desativada."
+                    config.assignedModelId.isNullOrBlank() -> "${role.displayName} não tem modelo associado."
+                    else -> {
+                        val model = container.database.localModelDao().getById(config.assignedModelId!!)
+                        when {
+                            model == null -> "${role.displayName}: o modelo associado não existe mais no catálogo."
+                            role == AgentRole.VISION && !model.supportsVision ->
+                                "Vision AI precisa de um modelo multimodal com suporte real a imagens."
+                            else -> null
+                        }
+                    }
+                }
+            }
+            if (unavailableAgents.isNotEmpty()) {
+                _calibrationState.value = _calibrationState.value.copy(
+                    isRunning = false,
+                    error = "Calibração não iniciada. Corrija antes: " + unavailableAgents.joinToString(" ")
+                )
+                return@launch
+            }
+
             val cases = mapOf(
                 AgentRole.CODING to listOf(
                     "NEBULA OS — Arquitetura do sistema: proponha a divisão entre kernel Linux, serviços de sistema, daemon de sessão, interface gráfica e aplicativos. Defina responsabilidades e limites entre módulos.",
